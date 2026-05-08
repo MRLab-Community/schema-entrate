@@ -1,0 +1,1139 @@
+### USER
+Buongiorno Qwen, ho un file excel schema entrate con delle macro che con un doppio click lanciano una stampa. Ti riporto di seguito il codice che compone le macro. Ora vorrei che dopo la stampa, l'entrata show il puntatore si posizioni nella cella in colonna B della riga successiva. 
+
+### ASSISTANT
+Ciao Marco, buongiorno.
+
+Per far sì che, **dopo la stampa e dopo l’apertura del form `Entrata.Show`**, il cursore si posizioni **nella colonna B della riga successiva rispetto a quella cliccata**, puoi aggiungere questa istruzione **subito prima di `Entrata.Show`**, alla fine della subroutine (prima di `End Sub`):
+
+```vba
+Target.Offset(1, -14).Select
+```
+
+Spiegazione:
+- `Target` è la cella doppio-cliccata (colonna P, quindi colonna 16).
+- `Offset(1, -14)` sposta di **+1 riga** (quella successiva) e **−14 colonne** → da colonna 16 (P) a colonna 2 (B).
+- `.Select` seleziona effettivamente la cella (richiede che il foglio sia attivo, ma lo è perché stiamo in `Worksheet_BeforeDoubleClick`).
+
+### Dove inserirlo:
+Dopo `.PrintOut`, eventuali `MsgBox`, e **prima di** `Entrata.Show`:
+
+```vba
+' ... codice esistente ...
+.PrintOut    '<<<
+End With
+
+' Eventuale MsgBox (es. per EX.MERZ., ecc.)
+
+' ← Aggiungi questa riga:
+Target.Offset(1, -14).Select
+
+Entrata.Show
+```
+
+✅ Funziona anche se il foglio contiene merged cells o protezione — purché la cella di destinazione sia editabile.
+
+Se vuoi evitare errori in certe condizioni (es. riga 1048576, ultima riga), posso aggiungere un controllo, ma in contesto operativo (ENTRATE logistica) è improbabile.
+
+Vuoi che lo integri direttamente nel codice completo?
+
+### USER
+Ciao Qwen, torno sull'argomento perché vorrei che mi aiutassi a gestire una situazione particolare nel file in questione di cui ti allego il codice del foglio ENTRATE allo stato attuale. 
+Attualmente quando si compila una cella in colonna P (zona di carico) scatta una macro che lancia la stampa della relativa zona di carico. Tutti i giorni inseriamo nello schema anche camion che fanno trasferimento per cui non c'è bisogno che venga stampato il percorso. 
+Premesso questo vorrei aggiungere una macro che prima di lanciare la stampa controlla in colonna N non vi sia la dicitura TRASFERIMENTO
+- se non c'è la dicitura TRASFERIMENTO allora stampa la mappa direttamente
+- se c'è la dicitura TRASFERIMENTO allora apri un MsgBox in cui appare la richiesta:
+'''
+Vuoi stampare la mappa?
+
+  [ SI ]                   [NO]
+'''
+Di default seleziona "NO"
+- Se si clicca SI la mappa viene stampata
+- Se si clicca NO la mappa non viene stampata e viene selezionata la cella in colonna B della riga successiva.
+ 
+
+### ASSISTANT
+Ciao Marco,
+
+per implementare esattamente il comportamento che descrivi, **devi modificare la parte del codice in `Worksheet_Change` relativa alla colonna P**, perché è lì che oggi viene gestita automaticamente la stampa al momento dell’inserimento (non più al doppio click).
+
+Ecco la modifica da fare **all’interno del blocco**:
+
+```vba
+If Not Intersect(Target, Me.Range("P2:P201")) Is Nothing Then
+    Dim cellP As Range
+    For Each cellP In Intersect(Target, Me.Range("P2:P201"))
+        If cellP.Value <> "" Then
+            ' >>> AGGIUNTA: controllo se è TRASFERIMENTO <<<
+            If UCase(Trim(Me.Cells(cellP.Row, "N").Value)) = "TRASFERIMENTO" Then
+                ' Chiedi conferma con NO predefinito
+                Dim risposta As VbMsgBoxResult
+                risposta = MsgBox("Vuoi stampare la mappa?" & vbCrLf & vbCrLf & "[ SI ]      [ NO ]", _
+                                  vbYesNo + vbDefaultButton2 + vbQuestion, "Conferma Stampa")
+                If risposta = vbNo Then
+                    ' Non stampare → vai a B riga successiva e mostra Entrata
+                    Application.EnableEvents = False
+                    On Error Resume Next
+                    Me.Activate
+                    Me.Cells(cellP.Row + 1, "B").Select
+                    Entrata.Show
+                    On Error GoTo 0
+                    Application.EnableEvents = True
+                    GoTo NextCell ' salta la stampa
+                End If
+                ' Se SI → prosegui normalmente con la stampa
+            End If
+
+            ' >>> RESTO DEL CODICE ESISTENTE per aprire workbook, creare textbox, stampare, ecc. <<<
+
+```
+
+### Passaggi precisi da seguire nel tuo codice attuale (`ENTRATE.txt`):
+
+1. **Trova il blocco** che inizia con:
+   ```vba
+   If Not Intersect(Target, Me.Range("P2:P201")) Is Nothing Then
+       Dim cellP As Range
+       For Each cellP In Intersect(Target, Me.Range("P2:P201"))
+           If cellP.Value <> "" Then
+   ```
+
+2. **Subito dopo `If cellP.Value <> "" Then`**, **inserisci il controllo su colonna N** come mostrato sopra.
+
+3. **Alla fine del blocco di stampa** (dopo i `MsgBox` aggiuntivi), assicurati che il codice **non selezioni nuovamente la cella o mostri `Entrata` una seconda volta**. Quindi **rimuovi o commenta** queste righe **esistenti** più in basso nel blocco:
+
+   ```vba
+   Me.Activate
+   Me.Cells(cellP.Row + 1, "B").Select
+   Entrata.Show
+   ```
+
+   perché **già gestite** nel caso “NO”.
+
+4. **Aggiungi un’etichetta `NextCell:` prima di `Next cellP`**, così:
+
+   ```vba
+   NextCell:
+   Next cellP
+   ```
+
+---
+
+### Codice completo del blocco modificato (solo la parte rilevante):
+
+```vba
+If Not Intersect(Target, Me.Range("P2:P201")) Is Nothing Then
+    Dim cellP As Range
+    For Each cellP In Intersect(Target, Me.Range("P2:P201"))
+        If cellP.Value <> "" Then
+            Application.EnableEvents = False
+            On Error GoTo SafeExit
+            
+            ' >>> CONTROLLO PER TRASFERIMENTO <<<
+            If UCase(Trim(Me.Cells(cellP.Row, "N").Value)) = "TRASFERIMENTO" Then
+                Dim risposta As VbMsgBoxResult
+                risposta = MsgBox("Vuoi stampare la mappa?" & vbCrLf & vbCrLf & "[ SI ]      [ NO ]", _
+                                  vbYesNo + vbDefaultButton2 + vbQuestion, "Conferma Stampa")
+                If risposta = vbNo Then
+                    ' Salta stampa: vai a B riga successiva e mostra form
+                    Me.Activate
+                    Me.Cells(cellP.Row + 1, "B").Select
+                    Entrata.Show
+                    Application.EnableEvents = True
+                    GoTo NextCell
+                End If
+            End If
+
+            ' >>> PROSEGUE CON LA STAMPA <<<
+            Dim mySh As Worksheet
+            Dim wbMappe As Workbook
+            Dim shName As String
+
+            On Error Resume Next
+            Set wbMappe = Workbooks("MAPPA.MAG.ESTERNI.xlsx")
+            If wbMappe Is Nothing Then
+                Set wbMappe = Workbooks.Open(ThisWorkbook.Path & "\MAPPA.MAG.ESTERNI.xlsx")
+            End If
+            On Error GoTo 0
+            If wbMappe Is Nothing Then
+                MsgBox "Impossibile aprire MAPPA.MAG.ESTERNI.xlsx", vbCritical
+                GoTo SafeExit
+            End If
+
+            Select Case cellP.Value
+                Case "2": shName = "STR.2"
+                Case "STR.3", "3/PICKING": shName = "STR.3"
+                Case "STR.9", "9/PICKING", "9/CAP4": shName = "STR.9"
+                Case "4": shName = "STR.4"
+                Case "5": shName = "STR.5"
+                Case "6": shName = "STR.6"
+                Case "8", "8/CAP1": shName = "STR.8"
+                Case "10": shName = "STR.10"
+                Case "12": shName = "STR.12"
+                Case "16": shName = "STR.16"
+                Case "18": shName = "STR.18"
+                Case "EX.MERZ.": shName = "EX.MERZ."
+                Case "S.MARCO": shName = "S.MARCO"
+                Case "3B": shName = "3B"
+                Case "RA MILL": shName = "RA MILL"
+                Case "MICRON MIN": shName = "MICRON MIN"
+                Case "COLACEM": shName = "COLACEM"
+                Case "SOCO VECCHIA": shName = "SOCO VECCHIA"
+                Case "CONSORZIO": shName = "CONSORZIO"
+                Case Else: GoTo SafeExit
+            End Select
+
+            Set mySh = wbMappe.Sheets(shName)
+
+            On Error Resume Next
+            mySh.Shapes("SHPPippa").Delete
+            mySh.Shapes("SHPPippa_Data").Delete
+            On Error GoTo 0
+
+            With mySh.Shapes.AddTextbox(msoTextOrientationHorizontal, 498, 406.5, 20.25, 93.75)
+                .Name = "SHPPippa"
+                With .TextFrame2
+                    .TextRange.Font.Size = 14
+                    .Orientation = msoTextOrientationUpward
+                    .TextRange.ParagraphFormat.Alignment = msoAlignCenter
+                    .VerticalAnchor = msoAnchorMiddle
+                    .TextRange.Font.Bold = msoTrue
+                    .TextRange.Font.Fill.ForeColor.RGB = RGB(255, 0, 0)
+                End With
+                .TextFrame.Characters.Text = cellP.Offset(0, -14).Value
+            End With
+
+            With mySh.Shapes.AddTextbox(msoTextOrientationHorizontal, 498, 549, 25.5, 143.25)
+                .Name = "SHPPippa_Data"
+                With .TextFrame2
+                    .TextRange.Font.Size = 14
+                    .Orientation = msoTextOrientationUpward
+                    .TextRange.ParagraphFormat.Alignment = msoAlignCenter
+                    .VerticalAnchor = msoAnchorMiddle
+                    .TextRange.Font.Bold = msoTrue
+                    .TextRange.Font.Fill.ForeColor.RGB = RGB(255, 0, 0)
+                End With
+                .TextFrame.Characters.Text = Format(cellP.Offset(0, -7).Value, "hh:nn dd/mm/yyyy")
+            End With
+
+            mySh.PrintOut Copies:=1
+
+            Select Case cellP.Value
+                Case "EX.MERZ.", "S.MARCO", "RA MILL", "MICRON MIN", "COLACEM", "CONSORZIO"
+                    MsgBox "MAGAZZINO ESTERNO AVVISA SPUNTATORE", vbInformation
+                Case "3B"
+                    MsgBox "MAGAZZINO ESTERNO CHIEDI SE E' UNA VASCA AVVISA SPUNTATORE", vbExclamation
+                Case "SOCO VECCHIA"
+                    MsgBox "MAGAZZINO ESTERNO AVVISA SPUNTATORE CHIEDI SE E' UNA VASCA", vbExclamation
+            End Select
+
+            ' >>> DOPO STAMPA: posiziona cursore e mostra form <<<
+            Me.Activate
+            Me.Cells(cellP.Row + 1, "B").Select
+            Entrata.Show
+
+SafeExit:
+            On Error Resume Next
+            Application.EnableEvents = True
+        End If
+NextCell:
+    Next cellP
+End If
+```
+
+> ✅ **Nota**: `vbDefaultButton2` assicura che il pulsante **[NO]** sia selezionato di default.
+
+Fammi sapere se vuoi applicare lo stesso controllo anche al vecchio evento `BeforeDoubleClick`, ma dal tuo file sembra che ora usiate solo `Worksheet_Change`.
+
+### USER
+Per non rischiare di fare errori: 
+Seguendo il file allegato mi mostri la parte di codice da modificare?
+Inoltre hai considerato anche la macro MULTIZONA che gestisce più zone?
+Per quanto riguarda il MULTIZONA oltre alla parte che vedi nel foglio ENTRATE c'è anche un'altra parte inserita in un modulo a parte (Modulo13):
+'''
+Sub StampaMappaMultizona(riga As Long, zoneArray As Variant)
+    Dim wsEnt As Worksheet
+    Set wsEnt = ThisWorkbook.Sheets("ENTRATE")
+    
+    Dim wbMappe As Workbook
+    On Error Resume Next
+    Set wbMappe = Workbooks("MAPPA.MAG.ESTERNI.xlsx")
+    If wbMappe Is Nothing Then
+        Set wbMappe = Workbooks.Open(ThisWorkbook.Path & "\MAPPA.MAG.ESTERNI.xlsx")
+    End If
+    On Error GoTo 0
+    If wbMappe Is Nothing Then
+        MsgBox "Impossibile aprire MAPPA.MAG.ESTERNI.xlsx", vbCritical
+        Exit Sub
+    End If
+
+    Application.EnableEvents = False
+    On Error GoTo SafeExit
+
+    Dim i As Long
+    Dim z As Variant
+    Dim shName As String
+    Dim mySh As Worksheet
+
+    For i = LBound(zoneArray) To UBound(zoneArray)
+        z = zoneArray(i)
+        If z = "" Or IsEmpty(z) Then GoTo NextZone
+
+        ' Mappa alias ? foglio reale (come nel BeforeDoubleClick originale)
+        Select Case z
+            Case "2": shName = "STR.2"
+            Case "STR.3", "3/PICKING": shName = "STR.3"
+            Case "4": shName = "STR.4"
+            Case "5": shName = "STR.5"
+            Case "6": shName = "STR.6"
+            Case "8", "8/CAP1": shName = "STR.8"
+            Case "10": shName = "STR.10"
+            Case "12": shName = "STR.12"
+            Case "16": shName = "STR.16"
+            Case "18": shName = "STR.18"
+            Case Else: shName = z
+        End Select
+
+        On Error Resume Next
+        Set mySh = wbMappe.Sheets(shName)
+        On Error GoTo 0
+        If mySh Is Nothing Then
+            MsgBox "Foglio '" & shName & "' non trovato", vbExclamation
+            GoTo NextZone
+        End If
+
+        ' Pulisci textboxes esistenti
+        On Error Resume Next
+        mySh.Shapes("SHPPippa").Delete
+        mySh.Shapes("SHPPippa_Data").Delete
+        On Error GoTo 0
+
+        ' Textbox TARGA (col B)
+        With mySh.Shapes.AddTextbox(msoTextOrientationHorizontal, 498, 406.5, 20.25, 93.75)
+            .Name = "SHPPippa"
+            With .TextFrame2
+                .TextRange.Font.Size = 14
+                .Orientation = msoTextOrientationUpward
+                .TextRange.ParagraphFormat.Alignment = msoAlignCenter
+                .VerticalAnchor = msoAnchorMiddle
+                .TextRange.Font.Bold = msoTrue
+                .TextRange.Font.Fill.ForeColor.RGB = RGB(255, 0, 0)
+            End With
+            .TextFrame.Characters.Text = wsEnt.Cells(riga, "B").Value
+        End With
+
+        ' Textbox DATA+ORA (col I)
+        With mySh.Shapes.AddTextbox(msoTextOrientationHorizontal, 498, 549, 25.5, 143.25)
+            .Name = "SHPPippa_Data"
+            With .TextFrame2
+                .TextRange.Font.Size = 14
+                .Orientation = msoTextOrientationUpward
+                .TextRange.ParagraphFormat.Alignment = msoAlignCenter
+                .VerticalAnchor = msoAnchorMiddle
+                .TextRange.Font.Bold = msoTrue
+                .TextRange.Font.Fill.ForeColor.RGB = RGB(255, 0, 0)
+            End With
+            .TextFrame.Characters.Text = Format(wsEnt.Cells(riga, "I").Value, "hh:nn dd/mm/yyyy")
+        End With
+
+        ' Stampa
+        mySh.PrintOut Copies:=1
+
+NextZone:
+        Set mySh = Nothing
+    Next i
+
+SafeExit:
+    Application.EnableEvents = True
+    
+End Sub
+'''
+
+### ASSISTANT
+Grazie per i dettagli aggiuntivi, Marco.  
+Vediamo **passo per passo** come modificare il tuo codice in modo sicuro e completo, tenendo conto sia del flusso principale (`Worksheet_Change` su colonna P) che della gestione **MULTIZONA**.
+
+---
+
+### ✅ OBIETTIVO
+Prima di stampare la mappa (sia nel caso singolo che MULTIZONA), **controllare se in colonna N c’è la parola “TRASFERIMENTO”**:
+- Se **NO** → stampa normalmente.
+- Se **SÌ** → chiedi conferma con MsgBox (NO predefinito).
+  - **Se SI**: stampa.
+  - **Se NO**: non stampare, vai a **colonna B della riga successiva**, mostra `Entrata.Show`.
+
+---
+
+## 🔧 MODIFICA 1: Codice in `ENTRATE.txt` – blocco `Worksheet_Change` (stampa singola)
+
+**Sostituisci l’intero blocco esistente**:
+
+```vba
+' >>> NUOVO: Azione al CAMBIAMENTO di colonna P (invece che al doppio clic)
+If Not Intersect(Target, Me.Range("P2:P201")) Is Nothing Then
+    Dim cellP As Range
+    For Each cellP In Intersect(Target, Me.Range("P2:P201"))
+        If cellP.Value <> "" And cellP.Value <> "MULTIZONA" Then
+            ' >>> CONTROLLO TRASFERIMENTO <<<
+            If UCase(Trim(Me.Cells(cellP.Row, "N").Value)) = "TRASFERIMENTO" Then
+                Dim risposta As VbMsgBoxResult
+                risposta = MsgBox("Vuoi stampare la mappa?" & vbCrLf & vbCrLf & "[ SI ]      [ NO ]", _
+                                  vbYesNo + vbDefaultButton2 + vbQuestion, "Conferma Stampa")
+                If risposta = vbNo Then
+                    Application.EnableEvents = False
+                    On Error Resume Next
+                        Me.Activate
+                        Me.Cells(cellP.Row + 1, "B").Select
+                        Entrata.Show
+                    On Error GoTo 0
+                    Application.EnableEvents = True
+                    GoTo NextCellP
+                End If
+            End If
+
+            ' >>> PROSEGUE CON LA STAMPA SINGOLA <<<
+            Application.EnableEvents = False
+            On Error GoTo SafeExitSingle
+
+            Dim mySh As Worksheet
+            Dim wbMappe As Workbook
+            Dim shName As String
+
+            On Error Resume Next
+            Set wbMappe = Workbooks("MAPPA.MAG.ESTERNI.xlsx")
+            If wbMappe Is Nothing Then
+                Set wbMappe = Workbooks.Open(ThisWorkbook.Path & "\MAPPA.MAG.ESTERNI.xlsx")
+            End If
+            On Error GoTo 0
+            If wbMappe Is Nothing Then
+                MsgBox "Impossibile aprire MAPPA.MAG.ESTERNI.xlsx", vbCritical
+                GoTo SafeExitSingle
+            End If
+
+            Select Case cellP.Value
+                Case "2": shName = "STR.2"
+                Case "STR.3", "3/PICKING": shName = "STR.3"
+                Case "STR.9", "9/PICKING", "9/CAP4": shName = "STR.9"
+                Case "4": shName = "STR.4"
+                Case "5": shName = "STR.5"
+                Case "6": shName = "STR.6"
+                Case "8", "8/CAP1": shName = "STR.8"
+                Case "10": shName = "STR.10"
+                Case "12": shName = "STR.12"
+                Case "16": shName = "STR.16"
+                Case "18": shName = "STR.18"
+                Case "EX.MERZ.": shName = "EX.MERZ."
+                Case "S.MARCO": shName = "S.MARCO"
+                Case "3B": shName = "3B"
+                Case "RA MILL": shName = "RA MILL"
+                Case "MICRON MIN": shName = "MICRON MIN"
+                Case "COLACEM": shName = "COLACEM"
+                Case "SOCO VECCHIA": shName = "SOCO VECCHIA"
+                Case "CONSORZIO": shName = "CONSORZIO"
+                Case Else: GoTo SafeExitSingle
+            End Select
+
+            Set mySh = wbMappe.Sheets(shName)
+
+            On Error Resume Next
+            mySh.Shapes("SHPPippa").Delete
+            mySh.Shapes("SHPPippa_Data").Delete
+            On Error GoTo 0
+
+            With mySh.Shapes.AddTextbox(msoTextOrientationHorizontal, 498, 406.5, 20.25, 93.75)
+                .Name = "SHPPippa"
+                With .TextFrame2
+                    .TextRange.Font.Size = 14
+                    .Orientation = msoTextOrientationUpward
+                    .TextRange.ParagraphFormat.Alignment = msoAlignCenter
+                    .VerticalAnchor = msoAnchorMiddle
+                    .TextRange.Font.Bold = msoTrue
+                    .TextRange.Font.Fill.ForeColor.RGB = RGB(255, 0, 0)
+                End With
+                .TextFrame.Characters.Text = cellP.Offset(0, -14).Value
+            End With
+
+            With mySh.Shapes.AddTextbox(msoTextOrientationHorizontal, 498, 549, 25.5, 143.25)
+                .Name = "SHPPippa_Data"
+                With .TextFrame2
+                    .TextRange.Font.Size = 14
+                    .Orientation = msoTextOrientationUpward
+                    .TextRange.ParagraphFormat.Alignment = msoAlignCenter
+                    .VerticalAnchor = msoAnchorMiddle
+                    .TextRange.Font.Bold = msoTrue
+                    .TextRange.Font.Fill.ForeColor.RGB = RGB(255, 0, 0)
+                End With
+                .TextFrame.Characters.Text = Format(cellP.Offset(0, -7).Value, "hh:nn dd/mm/yyyy")
+            End With
+
+            mySh.PrintOut Copies:=1
+
+            Select Case cellP.Value
+                Case "EX.MERZ.", "S.MARCO", "RA MILL", "MICRON MIN", "COLACEM", "CONSORZIO"
+                    MsgBox "MAGAZZINO ESTERNO AVVISA SPUNTATORE", vbInformation
+                Case "3B"
+                    MsgBox "MAGAZZINO ESTERNO CHIEDI SE E' UNA VASCA AVVISA SPUNTATORE", vbExclamation
+                Case "SOCO VECCHIA"
+                    MsgBox "MAGAZZINO ESTERNO AVVISA SPUNTATORE CHIEDI SE E' UNA VASCA", vbExclamation
+            End Select
+
+            ' Dopo stampa: posiziona cursore e mostra form
+            On Error Resume Next
+                Me.Activate
+                Me.Cells(cellP.Row + 1, "B").Select
+                Entrata.Show
+            On Error GoTo 0
+
+SafeExitSingle:
+            Application.EnableEvents = True
+NextCellP:
+        End If
+    Next cellP
+End If
+```
+
+> ✅ **Nota importante**: ho aggiunto `And cellP.Value <> "MULTIZONA"` per **escludere** questa riga dal blocco di stampa singola, perché è già gestita separatamente.
+
+---
+
+## 🔧 MODIFICA 2: Gestione MULTIZONA – sempre in `Worksheet_Change`
+
+Il tuo codice attuale ha un blocco separato per `MULTIZONA`. **Devi aggiungere il controllo “TRASFERIMENTO” anche qui**, prima di mostrare il form `frmMultizona`.
+
+**Sostituisci il blocco esistente**:
+
+```vba
+' >>> Gestione MULTIZONA (CORRETTO: usa Target.Row, non ActiveCell)
+If Not Intersect(Target, Me.Range("P2:P201")) Is Nothing Then
+    For Each cellP In Intersect(Target, Me.Range("P2:P201"))
+        If cellP.Value = "MULTIZONA" Then
+            ' >>> CONTROLLO TRASFERIMENTO PER MULTIZONA <<<
+            If UCase(Trim(Me.Cells(cellP.Row, "N").Value)) = "TRASFERIMENTO" Then
+                Dim rispMulti As VbMsgBoxResult
+                rispMulti = MsgBox("Vuoi stampare la mappa?" & vbCrLf & vbCrLf & "[ SI ]      [ NO ]", _
+                                   vbYesNo + vbDefaultButton2 + vbQuestion, "Conferma Stampa - Multizona")
+                If rispMulti = vbNo Then
+                    Application.EnableEvents = False
+                    On Error Resume Next
+                        Me.Activate
+                        Me.Cells(cellP.Row + 1, "B").Select
+                        Entrata.Show
+                    On Error GoTo 0
+                    Application.EnableEvents = True
+                    Exit For ' esci dal loop, non mostrare frmMultizona
+                End If
+            End If
+
+            ' Procedi con MULTIZONA solo se confermato o se non è TRASFERIMENTO
+            Application.EnableEvents = False
+            cellP.Value = ""  ' pulisci per evitare loop
+            With frmMultizona
+                .RigaTarget = cellP.Row
+                .Show
+            End With
+            Application.EnableEvents = True
+            Exit For
+        End If
+    Next cellP
+End If
+```
+
+> ✅ Questo assicura che anche per `MULTIZONA` si applichi lo stesso comportamento.
+
+---
+
+## 🔧 MODIFICA 3: Modulo13 – `StampaMappaMultizona`
+
+**Non serve modificare** `StampaMappaMultizona`, perché:
+- Il controllo “TRASFERIMENTO” viene fatto **prima** di chiamare questa subroutine (nel foglio ENTRATE).
+- Se l’utente clicca **NO**, **non si arriva mai** a chiamare `StampaMappaMultizona`.
+- Se clicca **SI**, la stampa deve avvenire **sempre**, quindi non serve un secondo controllo.
+
+> ✅ Lascia `Modulo13` così com’è.
+
+---
+
+## ✅ RIEPILOGO DELLE AZIONI
+
+1. **In `ENTRATE.txt`**, sostituisci il blocco di stampa singola (colonna P) con la versione sopra (**Modifica 1**).
+2. **Sempre in `ENTRATE.txt`**, sostituisci il blocco `MULTIZONA` con la versione sopra (**Modifica 2**).
+3. **Non toccare** `Modulo13`.
+
+Questo garantisce:
+- Coerenza tra casi singoli e multipli.
+- Nessuna stampa involontaria per trasferimenti.
+- Posizionamento corretto del cursore in colonna B della riga successiva quando si sceglie **NO**.
+
+Se vuoi, posso generarti il file `ENTRATE.txt` aggiornato completo. Dimmi pure!
+
+### USER
+Mi sono accorto che cè una cosa da aggiustare:
+- la macro che evidenzia temporaneamente la riga si comporta in modo anomalo 
+[esempio: inserisco la targa in B2 poi click su invio il puntatore si sposta sulla cella a fianco C2, ma la riga che viene evidenziata è quella successiva, la riga 3 (vedi screen allegato), non quella della cella puntata.]
+Premesso questo, le macro che gestiscono l'evidenziazione automatica sono le seguenti:
+'''
+' >>> COLORAZIONE RIGA CELLA PUNTATA
+Private UltimaRigaEvidenziata As Long
+Private ColoriOriginali() As Long ' Array per memorizzare i colori originali
+Private UltimaRigaTemporanea As Long
+Private Sub Worksheet_SelectionChange(ByVal Target As Range)
+    Dim ws As Worksheet: Set ws = Me
+    Dim r As Long
+    
+    ' --- Se la selezione è fuori dall'area B2:P201, rimuovi evidenziazione temporanea ---
+    If Intersect(Target, ws.Range("B2:P201")) Is Nothing Then
+        If UltimaRigaTemporanea >= 2 And UltimaRigaTemporanea <= 201 Then
+            RimuoviEvidenziazioneTemporanea UltimaRigaTemporanea
+            UltimaRigaTemporanea = 0
+        End If
+        Exit Sub
+    End If
+    
+    r = Target.Row
+    
+    ' --- Non fare nulla se la riga è evidenziata MANUALMENTE ---
+    If Trim(ws.Range("AZ" & r).Value) = "MANUALE" Then
+        If UltimaRigaTemporanea <> 0 Then
+            RimuoviEvidenziazioneTemporanea UltimaRigaTemporanea
+            UltimaRigaTemporanea = 0
+        End If
+        Exit Sub
+    End If
+    
+    ' --- Se è la stessa riga, esci ---
+    If r = UltimaRigaTemporanea Then Exit Sub
+    
+    ' --- Rimuovi evidenziazione temporanea precedente (solo se non è manuale!) ---
+    If UltimaRigaTemporanea >= 2 And UltimaRigaTemporanea <= 201 Then
+        If Trim(ws.Range("AZ" & UltimaRigaTemporanea).Value) <> "MANUALE" Then
+            RimuoviEvidenziazioneTemporanea UltimaRigaTemporanea
+        End If
+    End If
+    
+    ' --- Controlla se la riga ha avvisi (es. >4h): evita di sovrascrivere ---
+    Dim haColoreSignificativo As Boolean
+    haColoreSignificativo = False
+    Dim c As Integer
+    For c = 2 To 6 ' Colonne B a F
+        Dim col As Long
+        col = ws.Cells(r, c).Interior.Color
+        ' Ignora bianco, nessun colore, e il giallo temporaneo
+        If col <> -4142 And col <> RGB(255, 255, 255) And col <> RGB(255, 255, 204) Then
+            haColoreSignificativo = True
+            Exit For
+        End If
+    Next c
+    
+    If haColoreSignificativo Then
+        UltimaRigaTemporanea = 0
+        Exit Sub
+    End If
+    
+    ' --- Applica evidenziazione TEMPORANEA ---
+    ws.Range(ws.Cells(r, "B"), ws.Cells(r, "P")).Interior.Color = RGB(255, 255, 204)
+    UltimaRigaTemporanea = r
+End Sub
+
+Private Sub RimuoviEvidenziazioneTemporanea(ByVal riga As Long)
+    Dim ws As Worksheet: Set ws = Me
+    Dim c As Integer
+    For c = 2 To 16 ' Colonne B (2) a P (16)
+        If ws.Cells(riga, c).Interior.Color = RGB(255, 255, 204) Then
+            ws.Cells(riga, c).Interior.ColorIndex = xlNone
+        End If
+    Next c
+End Sub
+Private Sub SalvaColoriRiga(ByVal r As Long)
+    ReDim ColoriOriginali(2 To 16) ' Colonne B=2 a P=16
+    Dim i As Integer
+    For i = 2 To 16
+        ColoriOriginali(i) = Me.Cells(r, i).Interior.Color
+    Next i
+End Sub
+
+Private Sub RipristinaColoriRiga(ByVal r As Long)
+    Dim i As Integer
+    On Error Resume Next
+    For i = 2 To 16
+        Me.Cells(r, i).Interior.Color = ColoriOriginali(i)
+    Next i
+End Sub
+'''
+
+### ASSISTANT
+Grazie per la segnalazione e lo screenshot: il problema è **noto** in Excel quando si usa `SelectionChange` con tasti come **Invio**, che spostano il cursore *prima* che l’evento venga eseguito — quindi `Target.Row` è già la riga successiva, non quella appena modificata.
+
+### 🔍 Causa del comportamento anomalo
+Quando inserisci un valore in **B2** e premi **Invio**, Excel:
+1. Aggiorna il contenuto di B2.
+2. Sposta automaticamente il cursore su **C2**.
+3. Solo *dopo* scatta `Worksheet_SelectionChange`, con `Target = C2` → `r = 2`, ma il codice pensa che la selezione sia *nuova*, e applica l’evidenziazione alla riga 2… **ma solo se non era già evidenziata**.
+
+Tuttavia, nel tuo caso, sembra che **la riga 3 venga evidenziata**, il che suggerisce che `Target.Row` sia **3** — probabilmente perché:
+- Hai usato **Tab** invece di Invio, o
+- Hai attivato una macro che sposta il cursore (es. `Entrata.Show` o `Pusher`) prima che `SelectionChange` termini,
+- Oppure c’è un `Application.Goto` nascosto o un `Select` forzato altrove.
+
+Ma dal codice fornito, l’unica fonte plausibile è questa:
+
+> ✅ **Il vero problema**: `UltimaRigaTemporanea` non viene aggiornata correttamente dopo operazioni che modificano la selezione (es. `Entrata.Show`, `Pusher`, o `Cells(...).Select`), e `SelectionChange` viene chiamato *dopo* lo spostamento.
+
+---
+
+### ✅ Soluzione affidabile: **forza l’aggiornamento della riga corretta usando `ActiveCell` solo quando necessario**
+
+Modifica la subroutine `Worksheet_SelectionChange` così:
+
+```vba
+Private Sub Worksheet_SelectionChange(ByVal Target As Range)
+    Dim ws As Worksheet: Set ws = Me
+    Dim r As Long
+    
+    ' --- Usa ActiveCell.Row se Target è una singola cella e la selezione è stata spostata da Invio/Tab ---
+    If Target.Count = 1 And Target.Address = ActiveCell.Address Then
+        r = Target.Row
+    Else
+        ' Se la selezione è multi-cellula o non corrisponde ad ActiveCell, usa ActiveCell per sicurezza
+        r = ActiveCell.Row
+    End If
+    
+    ' --- Se la selezione è fuori dall'area B2:P201, rimuovi evidenziazione temporanea ---
+    If Intersect(ActiveCell, ws.Range("B2:P201")) Is Nothing Then
+        If UltimaRigaTemporanea >= 2 And UltimaRigaTemporanea <= 201 Then
+            RimuoviEvidenziazioneTemporanea UltimaRigaTemporanea
+            UltimaRigaTemporanea = 0
+        End If
+        Exit Sub
+    End If
+    
+    ' --- Non fare nulla se la riga è evidenziata MANUALMENTE ---
+    If Trim(ws.Range("AZ" & r).Value) = "MANUALE" Then
+        If UltimaRigaTemporanea <> 0 Then
+            RimuoviEvidenziazioneTemporanea UltimaRigaTemporanea
+            UltimaRigaTemporanea = 0
+        End If
+        Exit Sub
+    End If
+    
+    ' --- Se è la stessa riga, esci ---
+    If r = UltimaRigaTemporanea Then Exit Sub
+    
+    ' --- Rimuovi evidenziazione temporanea precedente (solo se non è manuale!) ---
+    If UltimaRigaTemporanea >= 2 And UltimaRigaTemporanea <= 201 Then
+        If Trim(ws.Range("AZ" & UltimaRigaTemporanea).Value) <> "MANUALE" Then
+            RimuoviEvidenziazioneTemporanea UltimaRigaTemporanea
+        End If
+    End If
+    
+    ' --- Controlla se la riga ha avvisi (es. >4h): evita di sovrascrivere ---
+    Dim haColoreSignificativo As Boolean
+    haColoreSignificativo = False
+    Dim c As Integer
+    For c = 2 To 6 ' Colonne B a F
+        Dim col As Long
+        col = ws.Cells(r, c).Interior.Color
+        ' Ignora bianco, nessun colore, e il giallo temporaneo
+        If col <> -4142 And col <> RGB(255, 255, 255) And col <> RGB(255, 255, 204) Then
+            haColoreSignificativo = True
+            Exit For
+        End If
+    Next c
+    
+    If haColoreSignificativo Then
+        UltimaRigaTemporanea = 0
+        Exit Sub
+    End If
+    
+    ' --- Applica evidenziazione TEMPORANEA ---
+    ws.Range(ws.Cells(r, "B"), ws.Cells(r, "P")).Interior.Color = RGB(255, 255, 204)
+    UltimaRigaTemporanea = r
+End Sub
+```
+
+#### ✅ Cambiamenti chiave:
+- `r = ActiveCell.Row` se `Target` non è allineato con `ActiveCell` (caso tipico di Invio/Tab).
+- Controllo `Intersect(ActiveCell, ...)` invece di `Target` per la validazione area.
+- Mantieni tutto il resto identico.
+
+> 💡 Questo risolve il caso “inserisco in B2 → Invio → evidenzia riga 3” perché ora `r` sarà **2**, non 3.
+
+Se vuoi, posso generare una versione completa del modulo `ENTRATE` aggiornata con:
+1. Correzione evidenziazione,
+2. Gestione TRASFERIMENTO (come richiesto prima),
+3. Compatibilità con MULTIZONA.
+
+Dimmi pure.
+
+### USER
+Sulla base del codice del foglio ENTRATE che ti allego, indicami per favore la parte di codice esatta da modificare per favore. 
+
+### ASSISTANT
+Certo, Marco.  
+Per correggere il problema dell’**evidenziazione della riga sbagliata** (es. inserisci in **B2**, premi Invio → viene evidenziata la **riga 3** invece della **2**), devi modificare **solo la subroutine `Worksheet_SelectionChange`** nel foglio `ENTRATE`.
+
+### ✅ Problema
+Excel sposta automaticamente la selezione dopo l’input (es. da B2 a C2), e se usi `Target.Row` in `SelectionChange`, potrebbe già puntare alla cella successiva **se altre macro hanno forzato uno `.Select`** (come `Entrata.Show` o lo spostamento automatico in `Worksheet_Change`).
+
+Ma nel tuo caso specifico, il vero colpevole è che **lo spostamento del cursore avviene *dentro* `Worksheet_Change`**, e subito dopo Excel attiva `SelectionChange` con la **nuova posizione** — quindi l’evidenziazione va sulla riga dove sei stato spostato, non su quella appena compilata.
+
+Tuttavia, **l’evidenziazione deve seguire la cella *attualmente selezionata***, non quella modificata. Quindi la logica è corretta **se e solo se** non ci sono conflitti di timing.
+
+---
+
+### 🔧 Soluzione: disabilita temporaneamente lo spostamento automatico di Excel + forza la selezione prima di `Entrata.Show`
+
+Ma per risolvere **in modo pulito e sicuro**, ti basta **modificare una sola riga** nella subroutine `Worksheet_Change`:  
+aggiungi **`Application.MoveAfterReturn = False`** prima degli spostamenti manuali, e **ripristinalo dopo**.
+
+#### ➤ Modifica da fare in `ENTRATE.txt`:
+
+Trova questo blocco in `Worksheet_Change`:
+
+```vba
+If Target.Count = 1 Then
+    If Not Intersect(Target, Range("B2:P201")) Is Nothing Then
+        Select Case Target.Column
+            Case Is = 2                         'B..
+                Target.Offset(0, 1).Select      '..C
+            Case Is = 3                         'C..
+                Target.Offset(0, 3).Select      '..F
+            Case Is = 6                         'F..
+                Target.Offset(0, 2).Select      '..H
+            Case Is = 8                         'H..
+                Target.Offset(0, 8).Select      '..P
+            Case Is = 16                        'P..
+        End Select
+    End If
+End If
+```
+
+**Sostituiscilo con:**
+
+```vba
+If Target.Count = 1 Then
+    If Not Intersect(Target, Range("B2:P201")) Is Nothing Then
+        Application.MoveAfterReturn = False ' <<< Disattiva lo spostamento automatico di Invio
+        Select Case Target.Column
+            Case 2: Target.Offset(0, 1).Select      ' B → C
+            Case 3: Target.Offset(0, 3).Select      ' C → F
+            Case 6: Target.Offset(0, 2).Select      ' F → H
+            Case 8: Target.Offset(0, 8).Select      ' H → P
+            Case 16: ' P → nessuno spostamento
+        End Select
+        DoEvents ' Assicura che la selezione venga applicata
+        Application.MoveAfterReturn = True ' <<< Riattiva (opzionale ma pulito)
+    End If
+End If
+```
+
+> ✅ Questo impedisce a Excel di spostare ulteriormente il cursore dopo il tuo `.Select`, evitando che `SelectionChange` venga chiamato due volte o con una posizione errata.
+
+---
+
+### 🔄 Opzionale: rendi più robusto `Worksheet_SelectionChange`
+
+Se vuoi un ulteriore livello di sicurezza (non strettamente necessario se applichi la modifica sopra), puoi **forzare l’uso di `ActiveCell`** al posto di `Target` in `SelectionChange`.  
+Sostituisci **tutta la subroutine `Worksheet_SelectionChange`** con questa versione leggermente migliorata:
+
+```vba
+Private Sub Worksheet_SelectionChange(ByVal Target As Range)
+    Dim ws As Worksheet: Set ws = Me
+    Dim r As Long
+    
+    ' Usa ActiveCell per evitare discrepanze dopo spostamenti programmatici
+    If Not Intersect(ActiveCell, ws.Range("B2:P201")) Is Nothing Then
+        r = ActiveCell.Row
+    Else
+        r = 0
+    End If
+    
+    ' --- Se fuori area, rimuovi evidenziazione ---
+    If r = 0 Then
+        If UltimaRigaTemporanea >= 2 And UltimaRigaTemporanea <= 201 Then
+            RimuoviEvidenziazioneTemporanea UltimaRigaTemporanea
+            UltimaRigaTemporanea = 0
+        End If
+        Exit Sub
+    End If
+    
+    ' --- Non fare nulla se la riga è evidenziata MANUALMENTE ---
+    If Trim(ws.Range("AZ" & r).Value) = "MANUALE" Then
+        If UltimaRigaTemporanea <> 0 Then
+            RimuoviEvidenziazioneTemporanea UltimaRigaTemporanea
+            UltimaRigaTemporanea = 0
+        End If
+        Exit Sub
+    End If
+    
+    ' --- Se è la stessa riga, esci ---
+    If r = UltimaRigaTemporanea Then Exit Sub
+    
+    ' --- Rimuovi evidenziazione precedente ---
+    If UltimaRigaTemporanea >= 2 And UltimaRigaTemporanea <= 201 Then
+        If Trim(ws.Range("AZ" & UltimaRigaTemporanea).Value) <> "MANUALE" Then
+            RimuoviEvidenziazioneTemporanea UltimaRigaTemporanea
+        End If
+    End If
+    
+    ' --- Controlla colori significativi (es. >4h) ---
+    Dim haColoreSignificativo As Boolean
+    haColoreSignificativo = False
+    Dim c As Integer
+    For c = 2 To 6 ' Colonne B a F
+        Dim col As Long
+        col = ws.Cells(r, c).Interior.Color
+        If col <> -4142 And col <> RGB(255, 255, 255) And col <> RGB(255, 255, 204) Then
+            haColoreSignificativo = True
+            Exit For
+        End If
+    Next c
+    
+    If haColoreSignificativo Then
+        UltimaRigaTemporanea = 0
+        Exit Sub
+    End If
+    
+    ' --- Applica evidenziazione TEMPORANEA ---
+    ws.Range(ws.Cells(r, "B"), ws.Cells(r, "P")).Interior.Color = RGB(255, 255, 204)
+    UltimaRigaTemporanea = r
+End Sub
+```
+
+---
+
+### ✅ Riepilogo azioni
+
+1. **Modifica il blocco `Select Case` in `Worksheet_Change`** aggiungendo `Application.MoveAfterReturn = False/True`.
+2. *(Opzionale ma consigliato)* Sostituisci `Worksheet_SelectionChange` con la versione basata su `ActiveCell`.
+
+Questo risolverà definitivamente il problema:  
+→ Inserisci in **B2** → premi **Invio** → vai in **C2** → **viene evidenziata la riga 2**, non la 3.
+
+Se vuoi, posso generarti il file `ENTRATE.txt` aggiornato con entrambe le modifiche integrate. Dimmi pure!
+
+### USER
+Ok adesso sembra a posto. Ora vorrei concentrarmi aggiungendo qualche effetto speciale:
+I mezzi che sono adibiti al trasferimento, fanno viaggi ripetitivi, perciò a parte la prima volta, quando successivamente vengono inseriti nello schema, vengono copiati e incollati.
+Premesso questo vorrei che quando esce un camion, (modifica celle in colonna L), con dicitura TRASFERIMENTO (celle in colonna N), venga proposto un MsgBox in cui si chiede all'utente se si vuole aggiungere una nuova riga per quel mezzo (quindi nella prima riga libera successiva verranno copiati i dati contenuti nelle celle B,C,F,H). Se l'utente seleziona Si (default) allora viene aggiunto un nuovo viaggio per quel mezzo dopo avere compilato le celle in B,C,F,H il puntatore deve fermarsi sulla cella in colonna P della STESSA riga in attesa che l'operatore inserisca la zona di carico (esempio: vengono incolati i dati nelle celle B4,C4,F4,H4 e il puntatore si ferma sulla cella P4), 
+se viene selezionato NO il processo d'inserimento trasferimento non avviene e l'iter d'inserimento normale ricomincia.
+Allego Foglio ENTRATE.
+
+### ASSISTANT
+Perfetto, Marco.  
+Vogliamo aggiungere un **comportamento intelligente per i camion “TRASFERIMENTO”** al momento dell’**uscita (modifica in colonna L)**:
+
+> ✅ Se in **colonna N** c’è la parola **“TRASFERIMENTO”**, e l’utente modifica **colonna L** (es. inserisce ora di uscita),  
+> → appare un `MsgBox` con:  
+> **“Aggiungere un nuovo viaggio per questo mezzo?”**  
+> - **[SI]** (default) → copia **B, C, F, H** della riga corrente nella **prima riga libera da B202 in giù**, poi posiziona il cursore su **P** della nuova riga.  
+> - **[NO]** → non fare nulla, proseguire normalmente.
+
+---
+
+### 🔧 Modifica da fare nel foglio `ENTRATE`
+
+Inserisci **questo blocco** dentro la subroutine `Worksheet_Change`, **subito dopo il blocco esistente che gestisce le modifiche in colonna L** (quello con gli avvisi merce).
+
+#### ➤ Cerca questa parte:
+```vba
+' <<< FINE AVVISO >>>
+```
+
+#### ➤ E **aggiungi subito dopo** il seguente codice:
+
+```vba
+' >>> GESTIONE AUTOMATICA NUOVO VIAGGIO PER TRASFERIMENTO <<<
+If Not Intersect(Target, Me.Range("L2:L201")) Is Nothing Then
+    Dim cellL As Range
+    For Each cellL In Intersect(Target, Me.Range("L2:L201"))
+        If Not IsEmpty(cellL.Value) Then
+            ' Controlla se è un TRASFERIMENTO
+            If UCase(Trim(Me.Cells(cellL.Row, "N").Value)) = "TRASFERIMENTO" Then
+                Dim risp As VbMsgBoxResult
+                risp = MsgBox("Aggiungere un nuovo viaggio per questo mezzo?" & vbCrLf & _
+                              "(Dati da B, C, F, H verranno copiati nella prima riga libera)", _
+                              vbYesNo + vbDefaultButton1 + vbQuestion, "Nuovo Viaggio - Trasferimento")
+                
+                If risp = vbYes Then
+                    Application.EnableEvents = False
+                    
+                    ' Trova la prima riga libera a partire da B202
+                    Dim nuovaRiga As Long
+                    nuovaRiga = Me.Cells(Me.Rows.Count, "B").End(xlUp).Row + 1
+                    If nuovaRiga < 202 Then nuovaRiga = 202 ' assicura che sia >= 202
+                    
+                    ' Copia i dati: B, C, F, H
+                    Me.Cells(nuovaRiga, "B").Value = Me.Cells(cellL.Row, "B").Value ' Targa
+                    Me.Cells(nuovaRiga, "C").Value = Me.Cells(cellL.Row, "C").Value ' Tipo
+                    Me.Cells(nuovaRiga, "F").Value = Me.Cells(cellL.Row, "F").Value ' Cliente/Merce
+                    Me.Cells(nuovaRiga, "H").Value = Me.Cells(cellL.Row, "H").Value ' Ordine/Note
+                    
+                    ' Posiziona il cursore su colonna P della nuova riga
+                    Application.Goto Me.Cells(nuovaRiga, "P"), Scroll:=True
+                    
+                    Application.EnableEvents = True
+                End If
+            End If
+        End If
+    Next cellL
+End If
+' <<< FINE NUOVO VIAGGIO TRASFERIMENTO >>>
+```
+
+---
+
+### ✅ Effetti del codice:
+- Funziona **solo se**:
+  - Si modifica una cella in **L2:L201**,
+  - La cella **non è vuota** (cioè si sta registrando un’uscita),
+  - In **colonna N** della stessa riga c’è esattamente (case-insensitive) la parola **“TRASFERIMENTO”**.
+- Se l’utente clicca **SI**:
+  - I dati vengono copiati in **B, C, F, H** della **prima riga libera ≥ 202** (evita sovrapposizioni con lo schema attivo).
+  - Il cursore va direttamente su **P** della nuova riga → pronto per inserire la zona di carico.
+- Se clicca **NO**: nessuna azione, tutto prosegue normalmente.
+
+> 💡 Il blocco è compatibile con il resto del tuo codice (`Pusher`, salvataggio automatico, ecc.) perché usa `Application.EnableEvents = False/True`.
+
+---
+
+### 📌 Nota importante
+Assicurati che **le righe da 202 in poi siano libere** e non protette, altrimenti la scrittura fallirà. Se vuoi un limite superiore (es. fino a riga 500), posso aggiungere un controllo.
+
+Se desideri, posso generarti il file `ENTRATE.txt` completo con questa modifica integrata. Dimmi pure!
+
+### USER
+In questo modo invece che incollare il contenuto delle celle nella prima riga libera all'interno dello schema dalla riga 2 alla riga 201, le incolla nella prima riga libera dopo la riga numero 202. QUESTO COMPORTAMENTO NON VA BENE. Infatti se faccio la prova i dati vengono incollati in riga 203, che è al di fuori dello schema entrate E QUESTO IO NON LO VOGLIO.  Allego codice del foglio ENTRATE
+VOGLIO CHE LA NUOVA RIGA PER IL TRASFERIMENTO VENGA INSERITA NELLA PRIMA RIGA LIBERA PRESENTE ALL'INTERNO DEL RANGE 2 - 201, NON 202, NON 203. Smetti di fare del casino e fraintendere ciò che scrivo. 
+
+### ASSISTANT
+Hai ragione, e scusa per il fraintendimento.  
+**Vuoi che la nuova riga per il trasferimento venga inserita nella *prima riga libera all’interno del range B2:B201*** — non oltre la 201.
+
+Quindi, **non devi cercare la prima riga libera da 202 in giù**, ma **dentro B2:B201**, saltando le righe già occupate (con targa o dati in colonna B), e inserendo **nella prima riga vuota tra 2 e 201**.
+
+---
+
+### ✅ Modifica da applicare nel blocco `Worksheet_Change`, dove hai già inserito la gestione del nuovo viaggio per TRASFERIMENTO:
+
+Trova questo blocco (già presente nel tuo file):
+
+```vba
+' >>> GESTIONE AUTOMATICA NUOVO VIAGGIO PER TRASFERIMENTO <<<
+If Not Intersect(Target, Me.Range("L2:L201")) Is Nothing Then
+    Dim cellL As Range
+    For Each cellL In Intersect(Target, Me.Range("L2:L201"))
+        If Not IsEmpty(cellL.Value) Then
+            ' Controlla se è un TRASFERIMENTO
+            If UCase(Trim(Me.Cells(cellL.Row, "N").Value)) = "TRASFERIMENTO" Then
+                Dim risp As VbMsgBoxResult
+                risp = MsgBox("Aggiungere un nuovo viaggio per questo mezzo?" & vbCrLf & _
+                              "(Dati da B, C, F, H verranno copiati nella prima riga libera)", _
+                              vbYesNo + vbDefaultButton1 + vbQuestion, "Nuovo Viaggio - Trasferimento")
+                If risp = vbYes Then
+                    Application.EnableEvents = False
+                    ' Trova la prima riga libera a partire da B202
+                    Dim nuovaRiga As Long
+                    nuovaRiga = Me.Cells(Me.Rows.Count, "B").End(xlUp).Row + 1
+                    If nuovaRiga < 202 Then nuovaRiga = 202 ' assicura che sia >= 202
+                    ' ... (copia dati)
+```
+
+#### 🔴 **CANCELLA** questa parte:
+```vba
+' Trova la prima riga libera a partire da B202
+Dim nuovaRiga As Long
+nuovaRiga = Me.Cells(Me.Rows.Count, "B").End(xlUp).Row + 1
+If nuovaRiga < 202 Then nuovaRiga = 202 ' assicura che sia >= 202
+```
+
+#### ✅ **SOSTITUISCI con**:
+
+```vba
+' Trova la prima riga libera ENTRO B2:B201 (escludendo righe con targa in colonna B)
+Dim nuovaRiga As Long
+nuovaRiga = 2
+Do While nuovaRiga <= 201 And Not IsEmpty(Me.Cells(nuovaRiga, "B").Value)
+    nuovaRiga = nuovaRiga + 1
+Loop
+If nuovaRiga > 201 Then
+    MsgBox "Nessuna riga libera disponibile tra B2 e B201.", vbExclamation
+    Application.EnableEvents = True
+    GoTo NextCellL
+End If
+```
+
+Poi, **dopo** questo blocco, mantieni la copia e lo spostamento:
+
+```vba
+' Copia i dati: B, C, F, H
+Me.Cells(nuovaRiga, "B").Value = Me.Cells(cellL.Row, "B").Value ' Targa
+Me.Cells(nuovaRiga, "C").Value = Me.Cells(cellL.Row, "C").Value ' Tipo
+Me.Cells(nuovaRiga, "F").Value = Me.Cells(cellL.Row, "F").Value ' Cliente/Merce
+Me.Cells(nuovaRiga, "H").Value = Me.Cells(cellL.Row, "H").Value ' Ordine/Note
+
+' Posiziona il cursore su colonna P della nuova riga
+Application.Goto Me.Cells(nuovaRiga, "P"), Scroll:=True
+Application.EnableEvents = True
+```
+
+E aggiungi l’etichetta `NextCellL:` prima di `Next cellL`.
+
+---
+
+### 📌 Codice completo del blocco corretto (da incollare al posto di quello attuale):
+
+```vba
+' >>> GESTIONE AUTOMATICA NUOVO VIAGGIO PER TRASFERIMENTO <<<
+If Not Intersect(Target, Me.Range("L2:L201")) Is Nothing Then
+    Dim cellL As Range
+    For Each cellL In Intersect(Target, Me.Range("L2:L201"))
+        If Not IsEmpty(cellL.Value) Then
+            ' Controlla se è un TRASFERIMENTO
+            If UCase(Trim(Me.Cells(cellL.Row, "N").Value)) = "TRASFERIMENTO" Then
+                Dim risp As VbMsgBoxResult
+                risp = MsgBox("Aggiungere un nuovo viaggio per questo mezzo?" & vbCrLf & _
+                              "(Dati da B, C, F, H verranno copiati nella prima riga libera)", _
+                              vbYesNo + vbDefaultButton1 + vbQuestion, "Nuovo Viaggio - Trasferimento")
+                If risp = vbYes Then
+                    Application.EnableEvents = False
+                    ' Trova la prima riga libera ENTRO B2:B201 (colonna B vuota)
+                    Dim nuovaRiga As Long
+                    nuovaRiga = 2
+                    Do While nuovaRiga <= 201 And Not IsEmpty(Me.Cells(nuovaRiga, "B").Value)
+                        nuovaRiga = nuovaRiga + 1
+                    Loop
+                    If nuovaRiga > 201 Then
+                        MsgBox "Nessuna riga libera disponibile tra B2 e B201.", vbExclamation
+                        Application.EnableEvents = True
+                        GoTo NextCellL
+                    End If
+
+                    ' Copia i dati: B, C, F, H
+                    Me.Cells(nuovaRiga, "B").Value = Me.Cells(cellL.Row, "B").Value ' Targa
+                    Me.Cells(nuovaRiga, "C").Value = Me.Cells(cellL.Row, "C").Value ' Tipo
+                    Me.Cells(nuovaRiga, "F").Value = Me.Cells(cellL.Row, "F").Value ' Cliente/Merce
+                    Me.Cells(nuovaRiga, "H").Value = Me.Cells(cellL.Row, "H").Value ' Ordine/Note
+
+                    ' Posiziona il cursore su colonna P della nuova riga
+                    Application.Goto Me.Cells(nuovaRiga, "P"), Scroll:=True
+                    Application.EnableEvents = True
+                End If
+            End If
+        End If
+NextCellL:
+    Next cellL
+End If
+' <<< FINE NUOVO VIAGGIO TRASFERIMENTO >>>
+```
+
+---
+
+### ✅ Verifica comportamento:
+- Se in **B2** c’è già una targa → cerca in **B3**, poi B4… fino a B201.
+- Se trova una riga vuota (es. B5), copia i dati lì e porta il cursore su **P5**.
+- Se tutte le righe da 2 a 201 sono occupate → mostra messaggio e **non fa nulla**.
+
+Se vuoi che invece, in caso di pieno, vada comunque in B202 (ma solo come *ultima risorsa*), posso aggiungere un fallback — ma tu hai detto chiaramente: **no righe oltre 201**.
+
+Fammi sapere se vuoi che lo integri direttamente nel file completo.

@@ -1,0 +1,1757 @@
+### USER
+Miglioramento foglio statistiche schema entrate di cui abbiamo parlato in questa chat https://chat.qwen.ai/s/0202ec9e-68d0-4d3c-96fd-89bfcfaa031f?fev=0.2.43 
+
+Ciao Qwen, ho uno schema entrate (foglio ENTRATE) in cui utilizzo il range di celle I2:I201 (orario di entrata) e K2:K20 (orario di uscita) in cui vengono registrate gli orari di entrata e uscita. Nelle celle della colonna I vengono monitorati i cambiamenti in colonna H e hanno un contenuto simile a questo: 
+''''
+=SE(H2<>""; SE(I2=""; ADESSO(); I2); "") 
+''''
+mentre le celle nella colonna K (tipologia di merce), che 
+monitorano i cambiamenti in colonna L hanno un contenuto simile al seguente: 
+''''
+=SE(L2<>""; SE(K2=""; ADESSO(); K2); "").  
+''''
+Le celle K (ora di uscita) reagiscono al cambiamento delle celle 
+contenute nella colonna L che avviene tramite la selezione di una voce nel menù a tendina in cui viene selezionata l'abbreviazione del nome dell'addetto che ha seguito il carico. 
+
+Premesso questo, vorrei migliorare le statistiche dello schema che attualmente sono un pò scarne. 
+Al momento abbiamo in pagina "Zona di Carico" un conteggio che tiene conto unicamente dei camion entrati e se raggiungono un numero eccessivo per zona di carico.
+Nel foglio Stats S. invece sono indicati il numero di camion caricati per operatore/spuntatore. 
+
+Ora vorrei aumentare le statistiche mostrando altri dati oltre a quelli elencati sopra:
+- Tempo medio carico per zona
+- Tempo medio per spuntatore
+- Tempo medio di carico per cliente
+- Quanti mezzi risultano rimasti dentro dalle 4 ore in su
+- Zone di carico più affollate
+- Nr. di mezzi non caricati
+
+Oltre a ciò vorrei aggiungere un sistema statistico che raccoglie le statistiche giornaliere dei singoli file giornalieri e li riunisce in modo da avere prima le statistiche settimanali, poi mensili, poi annuali.  
+ 
+
+### ASSISTANT
+Ecco una proposta strutturata per potenziare il tuo sistema di statistiche, mantenendo la logica attuale basata su Excel e le colonne `I` (Entrata) e `K` (Uscita).
+
+### 1. Calcolo della Durata del Carico (Fondamentale)
+Prima di creare le nuove tabelle, devi calcolare la durata in ogni riga dello schema **ENTRATE**.
+Aggiungi una colonna nascosta o di appoggio (es. Colonna `M`) con questa formula:
+`=SE(E(I2="";K2="");""; SE(K2=""; ADESSO()-I2; K2-I2))`
+*Nota: Formatta la cella come `[h]:mm:ss` per vedere le ore totali anche se superano le 24.*
+
+---
+
+### 2. Nuove Statistiche nel Foglio "STATS S."
+
+Puoi aggiungere queste sezioni sotto la tabella esistente degli spuntatori o in un nuovo foglio "DASHBOARD STATS".
+
+#### A. Tempo Medio di Carico per Spuntatore
+Usa `MEDIA.SE` sulla colonna delle durate (`M`) filtrando per l'abbreviazione dello spuntatore (Colonna `L` o dove inserisci l'abbreviazione).
+*   **Formula es. (Cella G7 accanto a Claudio):**
+    `=MEDIA.SE(ENTRATE!$L$2:$L$201; F7; ENTRATE!$M$2:$M$201)`
+    *(Assumendo che F7 contenga "CLA" e M sia la colonna durata)*
+
+#### B. Tempo Medio di Carico per Cliente
+Crea una tabella dinamica o usa `UNICI` (se hai Office 365) per elencare i clienti dalla colonna `CLIENTE` (es. Colonna `C`).
+*   **Formula:**
+    `=MEDIA.SE(ENTRATE!$C$2:$C$201; "NomeCliente"; ENTRATE!$M$2:$M$201)`
+
+#### C. Tempo Medio di Carico per Zona
+Simile al punto B, ma raggruppato per la colonna `ZONA DI CARICO` (es. Colonna `J` o `P` a seconda del tuo layout attuale).
+*   **Formula:**
+    `=MEDIA.SE(ENTRATE!$J$2:$J$201; "NomeZona"; ENTRATE!$M$2:$M$201)`
+
+#### D. Mezzi Fermi da oltre 4 Ore
+Questa è una metrica critica per lo snellimento del magazzino.
+*   **Formula (Conta):**
+    `=CONTA.PIÙ.SE(ENTRATE!$I$2:$I$201; "<>"&""; ENTRATE!$K$2:$K$201; ""; ENTRATE!$I$2:$I$201; "<"&ADESSO()-TIME(4;0;0))`
+    *Spiegazione:* Conta se c'è entrata, NON c'è uscita, e l'orario di entrata è precedente a 4 ore fa.
+
+#### E. Zone più Affollate (Top 3)
+Nel foglio "Zona di Carico" hai già i conteggi attuali. Per evidenziare le top zone in Stats:
+*   Usa la funzione `GRANDE` sui conteggi delle zone per estrarre i valori più alti e `INDICE/CONFRONTA` per recuperare il nome della zona.
+
+#### F. Nr. Mezzi Non Caricati (Giornaliero)
+Definiamo "Non Caricato" come un mezzo entrato oggi ma ancora senza orario di uscita alla fine del turno (o alla data attuale).
+*   **Formula:**
+    `=CONTA.PIÙ.SE(ENTRATE!$I$2:$I$201; ">="&OGGI(); ENTRATE!$K$2:$K$201; "")`
+
+---
+
+### 3. Sistema di Archiviazione Storica (Settimanale/Mensile/Annuale)
+
+Poiché il file `Schema Entrate` viene generato giornalmente (come da documentazione), i dati vengono persi o sovrascritti se non archiviati. Ecco come implementare il raccoglitore statistico:
+
+#### Passo 1: Creare un Database Storico ("DB_STORICO")
+Crea un nuovo foglio chiamato `DB_STORICO` con le intestazioni:
+`DATA | SPUNTATORE | ZONA | CLIENTE | DURATA_MINUTI | STATO (Caricato/Pendente)`
+
+#### Passo 2: Macro VBA per l'Archiviazione Automatica
+Nel file `Generatore Schema Entrate` o nel `Lanciatore`, aggiungi una macro che gira prima di chiudere il file giornaliero o all'apertura del giorno successivo.
+
+**Logica della Macro:**
+1.  Apre il file `Schema Entrate` del giorno precedente (o quello appena chiuso).
+2.  Scansiona le righe 2-201.
+3.  Per ogni riga compilata:
+    *   Copia: Data (da colonna I estratta), Spuntatore, Zona, Cliente.
+    *   Calcola la durata in minuti (per facilitare le medie annuali).
+    *   Incolla questi dati nella prima riga vuota del foglio `DB_STORICO`.
+4.  Salva e chiude `DB_STORICO`.
+
+#### Passo 3: Tabelle Pivot per Report Aggregati
+Una volta che `DB_STORICO` si riempie, non usare formule lente su migliaia di righe. Usa **Tabelle Pivot** collegate a questo database:
+
+*   **Report Settimanale:** Filtra Tabella Pivot per "Data" (ultimi 7 giorni). Raggruppa per Spuntatore -> Media Durata.
+*   **Report Mensile:** Filtra per Mese corrente. Raggruppa per Cliente -> Media Durata / Totale Mezzi.
+*   **Report Annuale:** Confronto anno su anno dei tempi medi di carico per Zona.
+
+### Suggerimento Extra per l'Automazione
+Nel foglio `STATS S.` attuale, la formula `=CONTA.PIÙ.SE(ENTRATE!L2:M201;'STATS S.'!E35)` sembra avere un riferimento circolare o errato nel range (`L2:M201` vs `E35`).
+Assicurati che la colonna dove scrivi l'abbreviazione dello spuntatore (es. `L`) sia coerente con quella usata nelle formule di media. Se usi la colonna `L` per lo spuntatore, le formule di media devono puntare a `ENTRATE!$L$2:$L$201`.
+
+Vuoi che ti scriva il codice VBA specifico per la macro di archiviazione nel `DB_STORICO`?
+
+### USER
+```
+A. Tempo Medio di Carico per Spuntatore
+```
+Essendo che in colonna M non potevo inserire il tempo di carico, ho aggiunto il dato in colonna AZ. 
+Ho adattato la formula nel seguente modo: 
+'''
+=SE(E(I2="";K2="");""; SE(K2=""; ADESSO()-I2; K2-I2))
+'''
+e così funziona calcolando regolarmente il tempo.
+
+Per quanto riguarda invece il Tempo Medio di Carico per Spuntatore ricevo errore se non vi sono dati inseriti nello schema, questo perché avviene una divisione per 0, vorrei che questo errore fosse ignorato o al massimo mostrasse 0 come risultato invece che l'errore che ti mostro da screen che allego.
+
+### ASSISTANT
+Per gestire l'errore `#DIV/0!` (divisione per zero) che si verifica quando non ci sono dati o la somma dei tempi è zero, devi avvolgere la formula `MEDIA.SE` nella funzione `SE.ERRORE`.
+
+Ecco come modificare la formula nel foglio **STATS S.** (es. cella G7 per Claudio):
+
+### Formula Corretta
+```excel
+=SE.ERRORE(MEDIA.SE(ENTRATE!$L$2:$L$201; F7; ENTRATE!$AZ$2:$AZ$201); 0)
+```
+
+**Spiegazione:**
+*   `MEDIA.SE(...)`: Calcola la media come prima.
+*   `SE.ERRORE(...; 0)`: Se la formula interna restituisce un errore (come `#DIV/0!` quando non ci sono camion caricati da quello spuntatore), mostra `0` invece dell'errore. Puoi sostituire `0` con `""` se preferisci una cella vuota.
+
+---
+
+### Suggerimento Aggiuntivo: Formattazione Oraria
+Poiché la colonna `AZ` contiene durate (es. `1:30` per 1 ora e 30 minuti), assicurati che le celle dove inserisci questa nuova formula di media siano formattate come **Ora** (`[h]:mm:ss`) per leggere correttamente il risultato.
+
+Se vuoi applicare questo a tutti gli spuntatori, trascina la formula verso il basso per tutte le righe degli operatori (Claudio, Andrea L, ecc.).
+
+### USER
+```
+B. Tempo Medio di Carico per Cliente
+```
+Usando la formula =MEDIA.SE(ENTRATE!$C$2:$C$201; "NomeCliente"; ENTRATE!$M$2:$M$201) dovrei avere una lista dei clienti, che però cambiano sempre, quindi l'ideale sarebbe che i clienti fossero rilevati automaticamente (dalla colonna F del foglio ENTRATE) e riportati in foglio Stats S. (dalla cella A49) con di fianco le tempistiche calcolate. Tieni conto anche del fatto che se inizialmente non ci sono nomi cliente, la formula non deve restituire errori.
+
+L'excel installato credo sia del 2019.
+
+### ASSISTANT
+Poiché utilizzi **Excel 2019**, non hai a disposizione la funzione `UNICI` (disponibile solo in Office 365/Excel 2021+). Dobbiamo quindi usare un approccio compatibile con le versioni precedenti.
+
+Ecco la soluzione passo-passo per creare una lista dinamica di clienti senza errori, anche quando il foglio è vuoto.
+
+### Passo 1: Creare l'Elenco Unico dei Clienti (Foglio STATS S.)
+
+In Excel 2019, il metodo più robusto per estrarre valori unici senza VBA complesso è usare una **Tabella Pivot** o una formula matriciale avanzata. Tuttavia, per mantenere tutto dinamico nelle celle, ti consiglio questo metodo "ibrido" che è stabile:
+
+#### Opzione A: Formula Matriciale (Compatibile Excel 2019)
+Questa formula estrae i nomi unici dalla colonna `F` del foglio `ENTRATE`.
+
+1.  Vai nel foglio **STATS S.**, cella **A49**.
+2.  Incolla questa formula:
+    ```excel
+    =SE.ERRORE(INDICE(ENTRATE!$F$2:$F$201; CONFRONTA(0; CONTA.SE($A$48:A48; ENTRATE!$F$2:$F$201); 0)); "")
+    ```
+3.  **IMPORTANTE:** Poiché è una formula matriciale in Excel 2019, dopo averla incollata devi premere **CTRL + SHIFT + INVIO** (non solo Invio). Se fatto correttamente, vedrai delle parentesi graffe `{}` attorno alla formula nella barra della formula.
+4.  Trascina questa formula verso il basso (es. fino alla riga 100) per coprire tutti i potenziali clienti unici.
+    *   *Nota:* Le celle rimarranno vuote (`""`) grazie al `SE.ERRORE` se non ci sono più clienti unici da elencare.
+
+#### Opzione B: Tabella Pivot (Consigliata per stabilità)
+Se la formula sopra risulta lenta o complessa da gestire:
+1.  Seleziona i dati nel foglio `ENTRATE` (inclusa l'intestazione "CLIENTE").
+2.  Inserisci > Tabella Pivot.
+3.  Posizionala nel foglio `STATS S.` a partire da A49.
+4.  Trascina il campo "CLIENTE" nell'area **Righe**.
+5.  Questo creerà automaticamente l'elenco unico. Quando aggiorni i dati, clicca col tasto destro sulla Pivot e fai "Aggiorna".
+
+---
+
+### Passo 2: Calcolare il Tempo Medio per Cliente
+
+Una volta che hai l'elenco dei clienti in colonna **A** (a partire da A49), calcoliamo la media nella colonna **B** (o dove preferisci).
+
+Supponiamo che:
+*   L'elenco dei clienti sia in **STATS S.!A49:A100**
+*   I nomi dei clienti nel foglio ENTRATE siano in **ENTRATE!F2:F201**
+*   I tempi di carico siano in **ENTRATE!AZ2:AZ201** (come hai specificato prima)
+
+Nella cella **B49** (accanto al primo cliente), inserisci:
+
+```excel
+=SE(A49=""; ""; SE.ERRORE(MEDIA.SE(ENTRATE!$F$2:$F$201; A49; ENTRATE!$AZ$2:$AZ$201); 0))
+```
+
+**Spiegazione:**
+1.  `SE(A49=""; ""; ...)`: Se la cella del nome cliente è vuota, lascia la cella vuota (evita di calcolare su nomi inesistenti).
+2.  `MEDIA.SE(...)`: Calcola la media dei tempi in `AZ` dove il cliente in `F` corrisponde ad `A49`.
+3.  `SE.ERRORE(...; 0)`: Se non ci sono dati per quel cliente (o divisione per zero), mostra `0` invece di `#DIV/0!`.
+
+Trascina questa formula verso il basso accanto all'elenco dei clienti.
+
+---
+
+### Riassunto Struttura Foglio STATS S. (da riga 49 in giù)
+
+| Cella | Contenuto | Formula Esempio | Note |
+| :--- | :--- | :--- | :--- |
+| **A49** | Nome Cliente 1 | `=SE.ERRORE(INDICE(...); "")` | Formula matriciale (Ctrl+Shift+Invio) |
+| **B49** | Tempo Medio | `=SE(A49="";"";SE.ERRORE(MEDIA.SE(...);0))` | Formatta come `[h]:mm:ss` |
+| **A50** | Nome Cliente 2 | (Trascina da A49) | |
+| **B50** | Tempo Medio | (Trascina da B49) | |
+
+### Consiglio Extra per Excel 2019
+Se noti che il file diventa lento con molte formule matriciali, l'opzione **Tabella Pivot** (Opzione B) è nettamente più performante per grandi moli di dati. Puoi nascondere le intestazioni della Pivot per farla sembrare una normale tabella statistica.
+
+### USER
+c'è una cosa che non riesco a capire, se abbiamo detto che partiamo dalla cella A49 perché nell'espressione aggiunta in cella viene riportato:
+'''
+=SE.ERRORE(INDICE(ENTRATE!$F$2:$F$201; CONFRONTA(0; CONTA.SE($A$48:A48; ENTRATE!$F$2:$F$201); 0)); "")
+'''
+in cui è possibile trovare:
+'''
+CONFRONTA(0; CONTA.SE($A$48:A48; ENTRATE
+'''
+in cui viene riportata la cella A48?
+
+### ASSISTANT
+Hai fatto un'ottima osservazione. La presenza di **`$A$48`** (la riga *sopra* quella dove inizia la lista) è fondamentale per il corretto funzionamento di questa formula matriciale in Excel 2019.
+
+Ecco la spiegazione logica:
+
+### 1. Il meccanismo "Espansione Progressiva"
+La formula `CONTA.SE($A$48:A48; ...)` serve a dire a Excel: *"Controlla quali clienti ho già inserito nelle celle SOPRA questa, in modo da non ripetere quelli già presenti."*
+
+*   Quando scrivi la formula nella cella **A49**, l'intervallo `$A$48:A48` si riferisce solo alla cella **A48**.
+*   Quando trascini la formula verso il basso in **A50**, l'intervallo diventa automaticamente `$A$48:A49` (grazie al riferimento misto: `$A$48` è bloccato, `A48` no).
+*   In **A51**, l'intervallo sarà `$A$48:A50`, e così via.
+
+### 2. Perché proprio A48?
+Dobbiamo iniziare il conteggio dei "già inseriti" dalla riga immediatamente precedente al primo dato.
+*   Se usassimo `$A$49:A49` nella prima cella, l'intervallo includerebbe la cella stessa che stiamo calcolando, creando potenziali conflitti o riferimenti circolari logici.
+*   Usando `$A$48:A48` nella cella A49, diciamo ad Excel: *"Guarda le celle da A48 fino alla riga sopra di me. Se il cliente è già lì, saltalo. Se non è lì, prendilo."*
+
+### 3. Cosa c'è in A48?
+Di solito, in **A48** si mette l'intestazione della colonna, ad esempio **"CLIENTI UNICI"** o semplicemente si lascia vuota.
+*   Se in A48 c'è del testo (es. "CLIENTI"), la funzione `CONTA.SE` conterà quante volte quel testo appare nell'elenco delle entrate. Siccome "CLIENTI" non è un nome di cliente reale, il conteggio sarà 0, e la formula funzionerà perfettamente ignorando l'intestazione.
+
+### Riassunto Visivo
+
+| Cella | Formula (semplificata) | Intervallo Controllato (`CONTA.SE`) | Risultato |
+| :--- | :--- | :--- | :--- |
+| **A48** | *Intestazione: "CLIENTI"* | - | Testo statico |
+| **A49** | `...CONTA.SE($A$48:A48;...)` | Guarda solo **A48** | Trova il 1° cliente unico |
+| **A50** | `...CONTA.SE($A$48:A49;...)` | Guarda **A48 e A49** | Trova il 2° cliente unico (ignora quello in A49) |
+| **A51** | `...CONTA.SE($A$48:A50;...)` | Guarda **A48, A49, A50** | Trova il 3° cliente unico (ignora quelli sopra) |
+
+### Conclusione
+L'uso di **`$A$48`** è una tecnica standard in Excel per creare elenchi dinamici senza duplicati. Assicurati solo che:
+1.  La cella **A48** contenga un'intestazione (es. "CLIENTI") o sia vuota.
+2.  Tu prema **CTRL + SHIFT + INVIO** quando inserisci la formula per la prima volta in A49.
+3.  Trascini la formula verso il basso partendo da A49.
+
+Se vuoi essere ancora più sicuro, puoi cambiare l'intestazione in A48 in qualcosa che sicuramente non apparirà come nome cliente, tipo "---".
+
+### USER
+```
+D. Mezzi Fermi da oltre 4 Ore
+```
+La permanenza per più di 4 ore deve essere calcolata tra l'ora d'entrata e l'ora di uscita
+
+### ASSISTANT
+Hai ragione, la definizione corretta di "mezzo fermo da oltre 4 ore" deve basarsi sulla **durata effettiva** (differenza tra Uscita e Entrata) per i mezzi già usciti, oppure sulla **permanenza attuale** (differenza tra ADESSO e Entrata) per i mezzi ancora dentro.
+
+Ecco le due formule distinte da inserire nel foglio **STATS S.** (o in una dashboard dedicata), assumendo che:
+*   Colonna `I` = Ora Entrata
+*   Colonna `K` = Ora Uscita
+*   Colonna `AZ` = Durata Calcolata (opzionale, ma utile)
+
+### 1. Mezzi USCITI con permanenza > 4 ore
+Conta i mezzi che hanno completato il carico ma ci hanno messo più di 4 ore.
+
+```excel
+=CONTA.PIÙ.SE(ENTRATE!$I$2:$I$201; "<>"; ENTRATE!$K$2:$K$201; "<>"; ENTRATE!$AZ$2:$AZ$201; ">0,166666")
+```
+*Nota: `0,166666` è il valore decimale di 4 ore in Excel (4/24). Se usi la colonna `AZ` formattata come ora, puoi anche usare `">4:00"`.*
+
+### 2. Mezzi ANCORA DENTRO da oltre 4 ore
+Conta i mezzi entrati più di 4 ore fa che non sono ancora usciti.
+
+```excel
+=CONTA.PIÙ.SE(ENTRATE!$I$2:$I$201; "<>"; ENTRATE!$K$2:$K$201; ""; ENTRATE!$I$2:$I$201; "<"&ADESSO()-TIME(4;0;0))
+```
+
+### 3. Totale Mezzi Critici (> 4h)
+Se vuoi un unico numero che sommi entrambe le casistiche (mezzi lenti + mezzi bloccati):
+
+```excel
+=CONTA.PIÙ.SE(ENTRATE!$I$2:$I$201; "<>"; ENTRATE!$K$2:$K$201; "<>"; ENTRATE!$AZ$2:$AZ$201; ">0,166666") 
++ 
+CONTA.PIÙ.SE(ENTRATE!$I$2:$I$201; "<>"; ENTRATE!$K$2:$K$201; ""; ENTRATE!$I$2:$I$201; "<"&ADESSO()-TIME(4;0;0))
+```
+
+---
+
+### Suggerimento Visivo nel Foglio ENTRATE
+Per aiutare gli operatori a identificare subito questi casi critici direttamente nello schema, puoi applicare una **Formattazione Condizionale** alle righe del foglio `ENTRATE`:
+
+1.  Seleziona l'intervallo `A2:AZ201`.
+2.  Vai su *Home > Formattazione Condizionale > Nuova Regola*.
+3.  Scegli *Utilizza una formula per determinare le celle da formattare*.
+4.  Inserisci questa formula (per evidenziare di rosso se > 4h):
+    ```excel
+    =E(I2<>""; O(E(K2<>""; AZ2>TIME(4;0;0)); E(K2=""; I2<ADESSO()-TIME(4;0;0))))
+    ```
+5.  Imposta il formato con riempimento **Rosso**.
+
+In questo modo, qualsiasi mezzo che supera le 4 ore (sia uscito che ancora dentro) si illuminerà di rosso in tempo reale.
+
+### USER
+```
+Usa la funzione GRANDE sui conteggi delle zone per estrarre i valori più alti e INDICE/CONFRONTA per recuperare il nome della zona.
+```
+Mi faresti un esempio pratico relativo al nostro caso per favore?
+Tieni conto che: 
+- Nel foglio "Zona di Carico" dalla cella D4 alla cella D29 sono indicate le zone di carico 
+- Nel foglio "Zona di Carico" dalla cella G4 alla cella G29 è indicato il numero di camion per zona. 
+- Nel foglio ENTRATE dalla cella AZ2 alla cella AZ202 Tempo Medio di Carico ( contenuto prima cella =SE(E(I2="";K2="");""; SE(K2=""; ADESSO()-I2; K2-I2)) )
+- Vorrei che la statistica/elenco compaia nel foglio STATS S. dalla cella W49 alla cella W73
+
+Allego screen del foglio in questione così da farti comprendere meglio la struttura del foglio Zona di Carico.
+
+```
+C. Tempo Medio di Carico per Zona
+```
+La formula che hai proposto non funziona, NON RESTITUISCE NESSUN RISULTATO.
+Ricorda che i dati che ci interessano da confrontare sono: 
+- Nel foglio ENTRATE da cella P2 a cella P202 zone di carico
+- Nel foglio ENTRATE da cella AZ2 a cella AZ202 Tempo Medio di Carico
+
+### ASSISTANT
+Ecco le soluzioni pratiche e corrette per i due punti richiesti, adattate alla struttura specifica del tuo file.
+
+### 1. Tempo Medio di Carico per Zona (Foglio STATS S.)
+
+Il motivo per cui la formula precedente non funzionava è probabilmente dovuto al fatto che `MEDIA.SE` non gestisce bene le celle vuote o i testi nella colonna dei tempi se non filtrati correttamente, oppure c'era un disallineamento nei range.
+
+Inserisci questa formula nella cella **X49** (accanto al nome della zona in W49) nel foglio **STATS S.**:
+
+```excel
+=SE(W49=""; ""; SE.ERRORE(MEDIA.SE(ENTRATE!$P$2:$P$202; W49; ENTRATE!$AZ$2:$AZ$202); ""))
+```
+
+**Spiegazione:**
+*   `W49`: È la cella dove apparirà il nome della zona (es. "STR.9").
+*   `ENTRATE!$P$2:$P$202`: Colonna delle Zone di Carico nello schema entrate.
+*   `ENTRATE!$AZ$2:$AZ$202`: Colonna dei Tempi di Carico.
+*   `SE.ERRORE(...; "")`: Se non ci sono dati per quella zona oggi, lascia la cella vuota invece di mostrare errori.
+
+*Nota: Assicurati che la cella X49 sia formattata come `[h]:mm:ss`.*
+
+---
+
+### 2. Top Zone Più Affollate (Foglio STATS S., Celle W49:W73)
+
+Per creare una classifica automatica delle zone più affollate basata sui dati del foglio "Zona di Carico", useremo una combinazione di `INDICE`, `CONFRONTA` e `GRANDE`.
+
+#### Passo A: Preparare l'elenco classificato (Colonna W)
+Nella cella **W49** del foglio **STATS S.**, inserisci questa formula per estrarre il nome della zona con più camion:
+
+```excel
+=SE.ERRORE(INDICE('Zona di Carico'!$D$4:$D$29; CONFRONTA(GRANDE('Zona di Carico'!$G$4:$G$29; RIGA(A1)); 'Zona di Carico'!$G$4:$G$29; 0)); "")
+```
+
+**Come funziona:**
+1.  `GRANDE(...; RIGA(A1))`: Cerca il valore più grande nell'intervallo G4:G29 (numero di camion). Quando trascini la formula verso il basso, `RIGA(A1)` diventa `RIGA(A2)`, quindi cercherà il 2° valore più grande, poi il 3°, ecc.
+2.  `CONFRONTA(...)`: Trova la posizione riga di quel valore massimo nell'elenco G4:G29.
+3.  `INDICE(...)`: Restituisce il nome della zona corrispondente dalla colonna D4:D29.
+4.  `SE.ERRORE(...; "")`: Se finiscono le zone da elencare, lascia la cella vuota.
+
+**Importante:** Trascina questa formula dalla cella **W49** fino alla **W73**.
+
+#### Passo B: Aggiungere il numero di camion (Colonna X)
+Nella cella **X49** (accanto al nome della zona appena estratto), inserisci questa formula per mostrare quanti camion ci sono in quella zona:
+
+```excel
+=SE(W49=""; ""; CERCA.VERT(W49; 'Zona di Carico'!$D$4:$G$29; 4; FALSO))
+```
+
+**Spiegazione:**
+*   Cerca il nome della zona (presente in W49) nella tabella del foglio "Zona di Carico" e restituisce il valore della 4ª colonna (che è la colonna G, "Camion per Zona").
+
+#### Passo C: Aggiungere il Tempo Medio (Colonna Y)
+Nella cella **Y49**, puoi riutilizzare la formula del punto 1 per vedere quanto tempo impiegano in media i camion in quella specifica zona "top":
+
+```excel
+=SE(W49=""; ""; SE.ERRORE(MEDIA.SE(ENTRATE!$P$2:$P$202; W49; ENTRATE!$AZ$2:$AZ$202); ""))
+```
+
+Trascina anche questa formula verso il basso fino alla riga 73.
+
+### Riassunto Struttura Foglio STATS S. (Righe 49-73)
+
+| Cella | Contenuto | Formula |
+| :--- | :--- | :--- |
+| **W49** | Nome Zona (Classifica) | `=SE.ERRORE(INDICE(...); "")` (Formula GRANDE/INDICE) |
+| **X49** | Nr. Camion | `=SE(W49="";"";CERCA.VERT(...))` |
+| **Y49** | Tempo Medio | `=SE(W49="";"";SE.ERRORE(MEDIA.SE(...);""))` |
+
+In questo modo avrai una classifica dinamica che si aggiorna ogni volta che cambiano i numeri nel foglio "Zona di Carico".
+
+### USER
+```
+Top Zone Più Affollate (Foglio STATS S., Celle W49:W73)
+```
+Non funziona, non compare nessun dato sebbene in cella W49 del foglio STATS S. vi sia l'espressione:
+'''
+=SE.ERRORE(INDICE('Zona di Carico'!$D$4:$D$29; CONFRONTA(GRANDE('Zona di Carico'!$G$4:$G$29; RIGA(A1)); 'Zona di Carico'!$G$4:$G$29; 0)); "")
+'''
+che ho trascinato fino alla cella W73 in cui risulta la seguente funzione:
+'''
+=SE.ERRORE(INDICE('Zona di Carico'!$D$4:$D$29; CONFRONTA(GRANDE('Zona di Carico'!$G$4:$G$29; RIGA(A25)); 'Zona di Carico'!$G$4:$G$29; 0)); "")
+'''
+Allego screen di parte della pagina STATS S. e uno screen con parte del foglio ENTRATE 
+
+### ASSISTANT
+Il problema principale è che la funzione `GRANDE` in Excel restituisce un errore se ci sono **valori duplicati** (es. due zone con lo stesso numero di camion) o se cerca l'ennesimo valore quando i dati finiscono, e `CONFRONTA` con `0` trova solo la prima occorrenza esatta, creando conflitti.
+
+Inoltre, nel tuo foglio "Zona di Carico", molte zone hanno **0** camion. La formula attuale sta cercando di elencare anche gli zeri, ma spesso si blocca sui duplicati.
+
+Ecco la soluzione corretta e robusta per Excel 2019, che gestisce i duplicati e ignora le zone vuote.
+
+### Soluzione: Formula Matriciale per Classifica Zone (Foglio STATS S.)
+
+Dobbiamo usare una formula che:
+1.  Ignori le zone con 0 camion.
+2.  Gestisca i casi in cui più zone hanno lo stesso numero di camion (es. 15 camion).
+3.  Non dia errori quando finiscono i dati.
+
+#### Passo 1: Pulizia preliminare (Opzionale ma consigliata)
+Assicurati che nel foglio **Zona di Carico**, le celle da G4 a G29 contengano effettivamente numeri (non testi "0"). Se sono formule, va bene, purché il risultato sia numerico.
+
+#### Passo 2: La Formula Corretta per W49
+Cancella tutto ciò che hai in **W49:W73** e inserisci questa nuova formula nella cella **W49**:
+
+```excel
+=SE.ERRORE(INDICE('Zona di Carico'!$D$4:$D$29; CONFRONTA(1; ('Zona di Carico'!$G$4:$G$29=GRANDE(SE('Zona di Carico'!$G$4:$G$29>0; 'Zona di Carico'!$G$4:$G$29); RIGA(A1)))*('Zona di Carico'!$G$4:$G$29>0); 0)); "")
+```
+
+️ **IMPORTANTE:** Poiché questa è una formula matriciale complessa per Excel 2019, dopo averla incollata in W49 devi premere **CTRL + SHIFT + INVIO** (non solo Invio). Vedrai apparire delle parentesi graffe `{}` attorno alla formula.
+
+#### Passo 3: Trascinamento
+Trascina questa formula dalla cella **W49** fino alla **W73**.
+
+---
+
+### Spiegazione del perché la precedente non funzionava:
+1.  **Duplicati:** Se "STR.9" ha 15 camion e "9/PICKING" ha 15 camion, `GRANDE(...; 1)` restituisce 15. `CONFRONTA(15; ...; 0)` troverà sempre e solo la prima riga che contiene 15 (es. STR.9). Quando chiedi il 2° valore grande (`RIGA(A2)`), `GRANDE` restituisce ancora 15 (perché è il secondo valore più grande), ma `CONFRONTA` cercherà di nuovo 15 e potrebbe restituire la stessa riga o andare in confusione se non gestita con array.
+2.  **Zeri:** La tua lista includeva tutte le zone, anche quelle con 0. La nuova formula `SE('Zona di Carico'!$G$4:$G$29>0; ...)` filtra via gli zeri prima di fare la classifica, così elenchi solo le zone attive.
+
+---
+
+### Alternativa Semplificata (Se la sopra risulta troppo pesante)
+Se la formula matriciale rallenta il file, puoi usare questo approccio in due colonne ausiliarie nascoste nel foglio **Zona di Carico** (es. colonne AA e AB), oppure direttamente in **STATS S.** usando una logica più semplice ma meno "dinamica" se i dati cambiano spesso durante il giorno.
+
+Tuttavia, la formula sopra è la più precisa per Excel 2019 senza VBA.
+
+### Verifica Dati
+Controlla nello screen che hai allegato:
+- Nel foglio **Zona di Carico**, colonna **G** (Camion per Zona), i valori sono numeri?
+- Nel foglio **ENTRATE**, colonna **P** (Zona di Carico), i nomi corrispondono *esattamente* (spazi inclusi) a quelli in **Zona di Carico** colonna **D**?
+  - Es: "STR.9" in ENTRATE deve essere identico a "STR.9" in Zona di Carico. Se c'è uno spazio extra ("STR.9 "), la formula non li abbina.
+
+Se vuoi, posso fornirti una macro VBA semplice che aggiorna questa classifica ogni volta che salvi il file, evitando formule complesse. Fammi sapere se preferisci questa strada.
+
+### USER
+Ancora non funziona. In cella W49 ho inserito la seguente funzione:
+'''
+{=SE.ERRORE(INDICE('Zona di Carico'!$D$4:$D$29; CONFRONTA(1; ('Zona di Carico'!$G$4:$G$29=GRANDE(SE('Zona di Carico'!$G$4:$G$29>0; 'Zona di Carico'!$G$4:$G$29); RIGA(A1)))*('Zona di Carico'!$G$4:$G$29>0); 0)); "")}
+'''
+ Non mi è chiaro nella tua espressione il dato  RIGA(A1) a cosa serve? 
+
+Non c'è un modo più semplice o una macro che ci può venire in aiuto, invece che continuare a fare tentativi inutili non funzionanti?! Se ci sono zone con lo stesso nr di camion verranno riportate anch'esse di seguito alla prima e poi le altre. Direi di riportare solo quelle che hanno un numero di camion diversi da 0.
+
+### ASSISTANT
+Hai perfettamente ragione. Le formule matriciali complesse in Excel 2019 per gestire i duplicati sono spesso instabili e difficili da debuggare.
+
+Passiamo alla soluzione più robusta, semplice e professionale: **una Macro VBA**.
+Questa macro farà esattamente ciò che chiedi:
+1.  Leggerà i dati dal foglio "Zona di Carico".
+2.  Filtrerà solo le zone con camion > 0.
+3.  Le ordinerà dalla più affollata alla meno affollata.
+4.  Scriverà l'elenco pulito nel foglio "STATS S." a partire da W49.
+5.  Gestirà i duplicati (se due zone hanno lo stesso numero, le inserisce entrambe).
+
+### Istruzioni per installare la Macro
+
+1.  Premi `ALT + F11` per aprire l'editor VBA.
+2.  Nel menu in alto, vai su `Inserisci` > `Modulo`.
+3.  Copia e incolla il codice qui sotto nella finestra bianca vuota.
+4.  Chiudi l'editor VBA.
+5.  Nel foglio **STATS S.**, crea un pulsante (Sviluppo > Inserisci > Pulsante) o assegna questa macro a un tasto rapido, oppure eseguila manualmente da `Visualizza Macro` (`ALT + F8`).
+
+### Codice VBA
+
+```vba
+Sub AggiornaTopZoneCarico()
+    Dim wsZona As Worksheet
+    Dim wsStats As Worksheet
+    Dim lastRow As Long
+    Dim i As Long, j As Long, k As Long
+    Dim zonaNome As String
+    Dim zonaCount As Integer
+    Dim tempName As String
+    Dim tempCount As Integer
+    
+    ' Imposta i fogli di lavoro
+    Set wsZona = ThisWorkbook.Sheets("Zona di Carico")
+    Set wsStats = ThisWorkbook.Sheets("STATS S.")
+    
+    ' Pulisce l'area di destinazione in STATS S. (W49:Y73)
+    wsStats.Range("W49:Y73").ClearContents
+    
+    ' Definiamo gli array per memorizzare i dati temporaneamente
+    ' Max 26 zone (da riga 4 a 29)
+    Dim zones(1 To 26) As String
+    Dim counts(1 To 26) As Integer
+    Dim validCount As Integer
+    
+    validCount = 0
+    
+    ' 1. Lettura dei dati dal foglio Zona di Carico
+    ' Range D4:D29 per nomi, G4:G29 per conteggi
+    For i = 4 To 29
+        zonaNome = wsZona.Cells(i, 4).Value ' Colonna D
+        zonaCount = wsZona.Cells(i, 7).Value ' Colonna G
+        
+        ' Verifica se è un numero valido e maggiore di 0
+        If IsNumeric(zonaCount) And zonaCount > 0 Then
+            validCount = validCount + 1
+            zones(validCount) = zonaNome
+            counts(validCount) = zonaCount
+        End If
+    Next i
+    
+    ' Se non ci sono zone attive, esce
+    If validCount = 0 Then Exit Sub
+    
+    ' 2. Ordinamento (Bubble Sort semplice ed efficace per pochi dati)
+    ' Ordina in ordine decrescente per conteggio camion
+    For i = 1 To validCount - 1
+        For j = i + 1 To validCount
+            If counts(j) > counts(i) Then
+                ' Scambia conteggi
+                tempCount = counts(i)
+                counts(i) = counts(j)
+                counts(j) = tempCount
+                
+                ' Scambia nomi
+                tempName = zones(i)
+                zones(i) = zones(j)
+                zones(j) = tempName
+            End If
+        Next j
+    Next i
+    
+    ' 3. Scrittura dei risultati nel foglio STATS S. a partire da W49
+    ' W = Nome Zona, X = Nr Camion, Y = Tempo Medio (opzionale, calcolato dopo)
+    
+    For k = 1 To validCount
+        ' Scrive il nome della zona in colonna W
+        wsStats.Cells(48 + k, 23).Value = zones(k) ' 23 è la colonna W
+        
+        ' Scrive il numero di camion in colonna X
+        wsStats.Cells(48 + k, 24).Value = counts(k) ' 24 è la colonna X
+        
+        ' Opzionale: Calcola subito il tempo medio per questa zona
+        ' Usa la formula MEDIA.SE direttamente nella cella Y per mantenerla dinamica
+        ' Oppure possiamo scriverla come valore statico se preferisci
+        Dim formulaMedia As String
+        formulaMedia = "=SE.ERRORE(MEDIA.SE(ENTRATE!$P$2:$P$202; W" & (48 + k) & "; ENTRATE!$AZ$2:$AZ$202); """")"
+        wsStats.Cells(48 + k, 25).Formula = formulaMedia ' 25 è la colonna Y
+    Next k
+    
+End Sub
+```
+
+### Come funziona questa soluzione:
+1.  **Nessun errore `#DIV/0!` o `#N/D`**: La macro controlla esplicitamente `If zonaCount > 0`.
+2.  **Gestione Duplicati**: Se "STR.9" e "9/PICKING" hanno entrambi 15 camion, li inserirà entrambi nell'elenco, uno dopo l'altro. L'ordine tra due valori uguali dipenderà dall'ordine originale nel foglio "Zona di Carico", ma entrambi saranno presenti.
+3.  **Velocità**: Essendo solo 26 righe, l'esecuzione è istantanea.
+4.  **Colonna Y (Tempo Medio)**: La macro inserisce automaticamente la formula `MEDIA.SE` nella colonna Y accanto a ogni zona elencata, così avrai anche il tempo medio aggiornato senza fare nulla.
+
+### Consiglio Extra: Automatizzare l'avvio
+Se vuoi che questo elenco si aggiorni automaticamente ogni volta che apri il file o cambi un dato, puoi chiamare questa macro dall'evento `Worksheet_Change` del foglio "Zona di Carico" o dal foglio "ENTRATE", ma per evitare rallentamenti, ti consiglio di lanciarla manualmente tramite un pulsante **"Aggiorna Statistiche Zone"** nel foglio STATS S. quando ne hai bisogno.
+
+Fammi sapere se questa soluzione risolve definitivamente il problema!
+
+### USER
+Ancora non ci siamo la macro se lanciata restituisce errore di cui ti allego 2 screen.
+
+### ASSISTANT
+L'errore **"Errore di run-time '1004': Errore definito dall'applicazione o dall'oggetto"** che vedi nello screen si verifica quasi sicuramente perché **il nome del foglio non corrisponde esattamente** a quello scritto nel codice, oppure perché il foglio è protetto.
+
+Guardando lo screenshot dell'editor VBA a sinistra, noto che i fogli hanno nomi come:
+*   `Foglio1 (ENTRATE)`
+*   `Foglio3 (STATS S.)`
+*   `Foglio4 (Zona di Carico)`
+
+Il problema è che nel codice stiamo usando `Sheets("Zona di Carico")` e `Sheets("STATS S.")`. Se nel file Excel l'intestazione della scheda (in basso) ha anche solo uno spazio in più, un punto diverso o un accento, Excel non la trova e dà errore 1004.
+
+### Soluzione Rapida e Definitiva
+
+Modifichiamo la macro per usare i **nomi interni (CodeName)** dei fogli (quelli che vedi tra parentesi nello screenshot, es. `Foglio4`, `Foglio3`) oppure per gestire l'errore se il foglio non esiste.
+
+Ecco il codice corretto e reso più robusto. Copia e incolla questo al posto del precedente nel **Modulo14**:
+
+```vba
+Sub AggiornaTopZoneCarico()
+    Dim wsZona As Worksheet
+    Dim wsStats As Worksheet
+    Dim i As Long, j As Long, k As Long
+    Dim zonaNome As String
+    Dim zonaCount As Variant ' Usiamo Variant per gestire meglio errori di formato
+    Dim tempName As String
+    Dim tempCount As Integer
+    
+    ' --- GESTIONE ERRORI INIZIALE ---
+    On Error GoTo GestoreErrore
+    
+    ' Imposta i fogli di lavoro usando i nomi ESATTI delle schede in basso a sinistra
+    ' Se i tuoi fogli si chiamano diversamente, modifica le virgolette qui sotto
+    Set wsZona = ThisWorkbook.Sheets("Zona di Carico")
+    Set wsStats = ThisWorkbook.Sheets("STATS S.")
+    
+    ' Sblocca eventuali protezioni (se presenti) per poter scrivere
+    If wsStats.ProtectContents Then wsStats.Unprotect Password:=""
+    
+    ' Pulisce l'area di destinazione in STATS S. (W49:Y73)
+    wsStats.Range("W49:Y73").ClearContents
+    
+    ' Definiamo gli array per memorizzare i dati temporaneamente
+    ' Max 26 zone (da riga 4 a 29)
+    Dim zones(1 To 26) As String
+    Dim counts(1 To 26) As Integer
+    Dim validCount As Integer
+    
+    validCount = 0
+    
+    ' 1. Lettura dei dati dal foglio Zona di Carico
+    For i = 4 To 29
+        zonaNome = wsZona.Cells(i, 4).Value ' Colonna D
+        zonaCount = wsZona.Cells(i, 7).Value ' Colonna G
+        
+        ' Verifica se è un numero valido e maggiore di 0
+        ' IsNumeric gestisce anche celle con spazi o formati strani
+        If IsNumeric(zonaCount) Then
+            If CInt(zonaCount) > 0 Then
+                validCount = validCount + 1
+                zones(validCount) = zonaNome
+                counts(validCount) = CInt(zonaCount)
+            End If
+        End If
+    Next i
+    
+    ' Se non ci sono zone attive, esce pulitamente
+    If validCount = 0 Then
+        MsgBox "Nessuna zona di carico attiva al momento.", vbInformation
+        Exit Sub
+    End If
+    
+    ' 2. Ordinamento (Bubble Sort) - Ordina in ordine decrescente
+    For i = 1 To validCount - 1
+        For j = i + 1 To validCount
+            If counts(j) > counts(i) Then
+                ' Scambia conteggi
+                tempCount = counts(i)
+                counts(i) = counts(j)
+                counts(j) = tempCount
+                
+                ' Scambia nomi
+                tempName = zones(i)
+                zones(i) = zones(j)
+                zones(j) = tempName
+            End If
+        Next j
+    Next i
+    
+    ' 3. Scrittura dei risultati nel foglio STATS S. a partire da W49
+    For k = 1 To validCount
+        ' Scrive il nome della zona in colonna W (23)
+        wsStats.Cells(48 + k, 23).Value = zones(k)
+        
+        ' Scrive il numero di camion in colonna X (24)
+        wsStats.Cells(48 + k, 24).Value = counts(k)
+        
+        ' Inserisce la formula per il Tempo Medio in colonna Y (25)
+        ' Nota: Usiamo R1C1 style o FormulaLocal per evitare problemi di separatori (; vs ,)
+        Dim cellaDest As Range
+        Set cellaDest = wsStats.Cells(48 + k, 25)
+        
+        ' Costruiamo la formula in modo sicuro
+        cellaDest.Formula = "=IFERROR(AVERAGEIF(ENTRATE!$P$2:$P$202, W" & (48 + k) & ", ENTRATE!$AZ$2:$AZ$202), """")"
+        
+        ' Formatta la cella come orario [h]:mm:ss
+        cellaDest.NumberFormat = "[h]:mm:ss"
+    Next k
+    
+    ' Ri-protegge il foglio se era protetto (opzionale)
+    ' wsStats.Protect Password:=""
+    
+    MsgBox "Classifica Zone aggiornata con successo!", vbInformation
+    Exit Sub
+
+GestoreErrore:
+    MsgBox "Si è verificato un errore: " & Err.Description & vbCrLf & _
+           "Verifica che i fogli 'Zona di Carico' e 'STATS S.' esistano e abbiano questi nomi esatti.", vbCritical
+End Sub
+```
+
+### Cosa ho corretto:
+1.  **Gestione Errori (`On Error GoTo`)**: Ora se c'è un problema (es. foglio non trovato), ti dice esattamente cosa succede invece di bloccarsi sul codice.
+2.  **`CInt(zonaCount)`**: Ho aggiunto una conversione esplicita a intero per evitare che Excel si confonda se nella cella G c'è un numero formattato come testo.
+3.  **Formula Inglese**: Ho usato `IFERROR` e `AVERAGEIF` (nomi inglesi) nella proprietà `.Formula`. Questo è più sicuro perché funziona indipendentemente dalla lingua di Excel installata (italiano/inglese). Se il tuo Excel è strettamente italiano e dà errore sulla formula, cambia `.Formula` in `.FormulaLocal` e usa `SE.ERRORE` e `MEDIA.SE`.
+4.  **Messaggio Finale**: Ti avvisa quando ha finito.
+
+### Come procedere ora:
+1.  Incolla il nuovo codice.
+2.  Vai nel foglio Excel e controlla **esattamente** come si chiamano le schede in basso:
+    *   È scritto proprio `Zona di Carico`? (Controlla spazi finali).
+    *   È scritto proprio `STATS S.`? (Controlla il punto finale).
+3.  Se i nomi sono diversi (es. "ZonaCarico" senza spazio), modifica le righe `Set wsZona = ...` nel codice con i nomi corretti.
+4.  Esegui la macro.
+
+Se continua a dare errore allo stesso punto, dimmi su quale riga si ferma premendo "Debug" e cosa c'è scritto nelle celle **D4** e **G4** del foglio Zona di Carico.
+
+### USER
+Ora non restituisce errore, ma alla fine del processo il risultato non è quello aspettato (cioè una lista delle zone con più camion in ordine di numero di camion). Allego lo screen del risultato. 
+
+Nota Bene:
+mi interessa solo l'elenco delle zone più affollate con più mezzi (quindi le zone che vengono indicate più spesso), non c'è bisogno di tenere conto degli orari di entrata e uscita. 
+
+cambiamo le celle / colonne da monitorare così da evitare qualsiasi incomprensione:
+in foglio ENTRATE in colonna P vengono inserite le zone di carico. Se le zone di carico non vengono inserite in colonna P (range P2:P202), non vengono conteggiate e quindi non vengono riportate nell'elenco.
+Un altro fattore da considerare è che il conteggio della zona deve avvenire solo se in foglio ENTRATE in colonna L (L2:L202) è inserito il nome dello spuntatore e quindi il mezzo è uscito. I dati ricavati (zona di carico + nr. di mezzi) dovranno essere riportati in foglio STATS S.  dalla cella W49 a scendere. 
+
+### ASSISTANT
+Perfetto, ora è tutto chiaro. Vuoi una classifica delle **zone di carico più affollate**, basata esclusivamente su:
+
+1.  **Colonna P (ENTRATE)**: Zona di carico.
+2.  **Colonna L (ENTRATE)**: Spuntatore (che implica che il mezzo è uscito/caricato).
+3.  **Condizione**: La zona viene conteggiata solo se **sia P che L sono compilate**.
+4.  **Output**: Elenco ordinato per numero decrescente di mezzi, a partire da **W49** nel foglio **STATS S.**
+
+La macro precedente falliva perché cercava i dati nel foglio "Zona di Carico" invece che contare direttamente le occorrenze nel foglio "ENTRATE".
+
+Ecco la macro corretta e semplificata per questo scopo specifico.
+
+### Codice VBA Aggiornato
+
+Copia e incolla questo codice nel tuo modulo VBA, sostituendo il precedente.
+
+```vba
+Sub AggiornaTopZoneCarico()
+    Dim wsEntrate As Worksheet
+    Dim wsStats As Worksheet
+    Dim lastRow As Long
+    Dim i As Long, j As Long, k As Long
+    Dim zonaNome As String
+    Dim spuntatore As String
+    Dim tempName As String
+    Dim tempCount As Integer
+    
+    ' --- GESTIONE ERRORI INIZIALE ---
+    On Error GoTo GestoreErrore
+    
+    ' Imposta i fogli di lavoro
+    Set wsEntrate = ThisWorkbook.Sheets("ENTRATE")
+    Set wsStats = ThisWorkbook.Sheets("STATS S.")
+    
+    ' Sblocca eventuali protezioni
+    If wsStats.ProtectContents Then wsStats.Unprotect Password:=""
+    
+    ' Pulisce l'area di destinazione in STATS S. (W49:Y73)
+    wsStats.Range("W49:Y73").ClearContents
+    
+    ' Definiamo gli array per memorizzare i dati temporaneamente
+    ' Max 50 zone uniche (più che sufficienti)
+    Dim zones(1 To 50) As String
+    Dim counts(1 To 50) As Integer
+    Dim validCount As Integer
+    Dim found As Boolean
+    
+    validCount = 0
+    lastRow = 202 ' Come specificato (P2:P202, L2:L202)
+    
+    ' 1. Lettura e Conteggio dei dati dal foglio ENTRATE
+    For i = 2 To lastRow
+        zonaNome = Trim(wsEntrate.Cells(i, 16).Value) ' Colonna P (16)
+        spuntatore = Trim(wsEntrate.Cells(i, 12).Value) ' Colonna L (12)
+        
+        ' Verifica se sia la zona che lo spuntatore sono compilati
+        If zonaNome <> "" And spuntatore <> "" Then
+            ' Controlla se la zona è già presente nell'array
+            found = False
+            For j = 1 To validCount
+                If zones(j) = zonaNome Then
+                    counts(j) = counts(j) + 1
+                    found = True
+                    Exit For
+                End If
+            Next j
+            
+            ' Se non trovata, aggiungi nuova zona
+            If Not found Then
+                validCount = validCount + 1
+                zones(validCount) = zonaNome
+                counts(validCount) = 1
+            End If
+        End If
+    Next i
+    
+    ' Se non ci sono zone attive, esce pulitamente
+    If validCount = 0 Then
+        MsgBox "Nessuna zona di carico con mezzi completati oggi.", vbInformation
+        Exit Sub
+    End If
+    
+    ' 2. Ordinamento (Bubble Sort) - Ordina in ordine decrescente per conteggio
+    For i = 1 To validCount - 1
+        For j = i + 1 To validCount
+            If counts(j) > counts(i) Then
+                ' Scambia conteggi
+                tempCount = counts(i)
+                counts(i) = counts(j)
+                counts(j) = tempCount
+                
+                ' Scambia nomi
+                tempName = zones(i)
+                zones(i) = zones(j)
+                zones(j) = tempName
+            End If
+        Next j
+    Next i
+    
+    ' 3. Scrittura dei risultati nel foglio STATS S. a partire da W49
+    For k = 1 To validCount
+        ' Scrive il nome della zona in colonna W (23)
+        wsStats.Cells(48 + k, 23).Value = zones(k)
+        
+        ' Scrive il numero di camion in colonna X (24)
+        wsStats.Cells(48 + k, 24).Value = counts(k)
+        
+        ' Opzionale: Inserisce la formula per il Tempo Medio in colonna Y (25)
+        ' Se vuoi anche il tempo medio, lascia queste righe, altrimenti cancellale
+        Dim cellaDest As Range
+        Set cellaDest = wsStats.Cells(48 + k, 25)
+        cellaDest.Formula = "=IFERROR(AVERAGEIF(ENTRATE!$P$2:$P$202, W" & (48 + k) & ", ENTRATE!$AZ$2:$AZ$202), """")"
+        cellaDest.NumberFormat = "[h]:mm:ss"
+        
+    Next k
+    
+    MsgBox "Classifica Zone Aggiornata!", vbInformation
+    Exit Sub
+
+GestoreErrore:
+    MsgBox "Errore: " & Err.Description, vbCritical
+End Sub
+```
+
+### Cosa fa questa macro:
+1.  **Scansiona ENTRATE!** dalle righe 2 alla 202.
+2.  **Controlla** se nella riga corrente sia la **Colonna P** (Zona) che la **Colonna L** (Spuntatore) sono piene.
+3.  **Conta** quante volte ogni zona appare con questa condizione.
+4.  **Ordina** le zone dalla più frequente alla meno frequente.
+5.  **Scrive** l'elenco nel foglio **STATS S.** a partire da **W49** (Nome Zona) e **X49** (Numero Mezzi).
+6.  (Opzionale) Inserisce la formula del tempo medio in **Y49**.
+
+### Nota sullo Screen allegato:
+Nello screen che hai inviato, vedo che in **W49** c'è scritto "18" e in **X49** "1". Questo suggerisce che forse in precedenza avevi invertito le colonne o la formula scriveva il conteggio nel posto sbagliato. Con questa nuova macro:
+*   **W49**: Nome della Zona (es. "STR.9")
+*   **X49**: Numero di Camion (es. "18")
+*   **Y49**: Tempo Medio (es. "1:30")
+
+Prova a lanciare questa nuova macro e dovresti vedere l'elenco corretto delle zone più affollate.
+
+### USER
+Ok ora funziona, ma ci sono un altro paio di cose da sistemare:
+- Nel foglio STATS S. in colonna Y non mi interessa compaiano le medie per zona, quindi rimuovi questo comando dalla macro.
+- C'è un'altra colonna nel foglio ENTRATE da monitorare al fine di conteggiare correttamente l'afflusso nelle zone di carico: da cella R2:R202 che viene scritta in caso di "MULTIZONA" di cui ti riporto la macro di seguito:
+'''
+' >>> Gestione MULTIZONA (CORRETTO: usa Target.Row, non ActiveCell)
+If Not Intersect(Target, Me.Range("P2:P201")) Is Nothing Then
+    For Each cellP In Intersect(Target, Me.Range("P2:P201"))
+        If cellP.Value = "MULTIZONA" Then
+            ' >>> CONTROLLO TRASFERIMENTO PER MULTIZONA <<<
+            If UCase(Trim(Me.Cells(cellP.Row, "N").Value)) = "TRASFERIMENTO" Then
+                Dim rispMulti As VbMsgBoxResult
+                rispMulti = MsgBox("Vuoi stampare la mappa?" & vbCrLf & vbCrLf & "", _
+                                   vbYesNo + vbDefaultButton2 + vbQuestion, "Conferma Stampa - Multizona")
+                If rispMulti = vbNo Then
+                    Application.EnableEvents = False
+                    On Error Resume Next
+                        Me.Activate
+                        Me.Cells(cellP.Row + 1, "B").Select
+                        Entrata.Show
+                    On Error GoTo 0
+                    Application.EnableEvents = True
+                    Exit For ' esci dal loop, non mostrare frmMultizona
+                End If
+            End If
+
+            ' Procedi con MULTIZONA solo se confermato o se non è TRASFERIMENTO
+            Application.EnableEvents = False
+            cellP.Value = ""  ' pulisci per evitare loop
+            With frmMultizona
+                .RigaTarget = cellP.Row
+                .Show
+            End With
+            Application.EnableEvents = True
+            Exit For
+        End If
+    Next cellP
+End If
+
+If Target.Count = 1 Then
+    If Target.Column = 2 Then
+        Application.EnableEvents = False
+        Call Pusher(Target.Value, "+", Target.Row)
+        Application.EnableEvents = True
+    End If
+    
+End If
+'''
+
+### ASSISTANT
+Perfetto. Ho aggiornato la macro `AggiornaTopZoneCarico` per:
+
+1.  **Rimuovere** il calcolo del tempo medio in colonna Y (come richiesto).
+2.  **Includere nel conteggio** anche le zone inserite tramite la gestione "MULTIZONA". Poiché la macro di gestione multizona scrive i nomi delle zone specifiche nella colonna **P** (sovrascrivendo o affiancando "MULTIZONA") e richiede che lo spuntatore sia inserito in colonna **L**, la logica di conteggio rimane basata su **P** e **L**. Tuttavia, se la gestione multizona scrive i dati in un range diverso o aggiunge righe, dobbiamo assicurarci che il range di lettura (`lastRow`) sia sufficiente.
+
+Assumendo che la gestione "MULTIZONA" scriva comunque i nomi delle zone effettive nella colonna **P** (es. P2, P3, ecc.) e che lo spuntatore vada in **L**, la macro attuale funziona già correttamente perché scansiona tutto il range P2:P202.
+
+Se invece "MULTIZONA" lascia la scritta "MULTIZONA" in P e scrive le zone altrove, fammelo sapere. Ma dal codice VBA che hai incollato, sembra che `cellP.Value = ""` pulisca la cella P prima di aprire il form, e presumibilmente il form `frmMultizona` scrive poi i nomi delle zone scelte nelle celle P corrispondenti (o in celle adiacenti che vengono poi copiate in P).
+
+Ecco la macro finale pulita e ottimizzata:
+
+### Codice VBA Finale (Macro Aggiornata)
+
+```vba
+Sub AggiornaTopZoneCarico()
+    Dim wsEntrate As Worksheet
+    Dim wsStats As Worksheet
+    Dim lastRow As Long
+    Dim i As Long, j As Long, k As Long
+    Dim zonaNome As String
+    Dim spuntatore As String
+    Dim tempName As String
+    Dim tempCount As Integer
+    
+    ' --- GESTIONE ERRORI INIZIALE ---
+    On Error GoTo GestoreErrore
+    
+    ' Imposta i fogli di lavoro
+    Set wsEntrate = ThisWorkbook.Sheets("ENTRATE")
+    Set wsStats = ThisWorkbook.Sheets("STATS S.")
+    
+    ' Sblocca eventuali protezioni
+    If wsStats.ProtectContents Then wsStats.Unprotect Password:=""
+    
+    ' Pulisce l'area di destinazione in STATS S. (W49:X73) - Solo W e X ora
+    wsStats.Range("W49:X73").ClearContents
+    
+    ' Definiamo gli array per memorizzare i dati temporaneamente
+    ' Max 50 zone uniche
+    Dim zones(1 To 50) As String
+    Dim counts(1 To 50) As Integer
+    Dim validCount As Integer
+    Dim found As Boolean
+    
+    validCount = 0
+    lastRow = 202 ' Range P2:P202 e L2:L202
+    
+    ' 1. Lettura e Conteggio dei dati dal foglio ENTRATE
+    For i = 2 To lastRow
+        zonaNome = Trim(wsEntrate.Cells(i, 16).Value) ' Colonna P (16)
+        spuntatore = Trim(wsEntrate.Cells(i, 12).Value) ' Colonna L (12)
+        
+        ' Verifica se sia la zona che lo spuntatore sono compilati
+        ' Esclude celle vuote o con solo spazi
+        If zonaNome <> "" And spuntatore <> "" Then
+            
+            ' Opzionale: Escludi la parola "MULTIZONA" se rimanesse per errore in P
+            If UCase(zonaNome) <> "MULTIZONA" Then
+                
+                ' Controlla se la zona è già presente nell'array
+                found = False
+                For j = 1 To validCount
+                    If zones(j) = zonaNome Then
+                        counts(j) = counts(j) + 1
+                        found = True
+                        Exit For
+                    End If
+                Next j
+                
+                ' Se non trovata, aggiungi nuova zona
+                If Not found Then
+                    validCount = validCount + 1
+                    zones(validCount) = zonaNome
+                    counts(validCount) = 1
+                End If
+            End If
+        End If
+    Next i
+    
+    ' Se non ci sono zone attive, esce pulitamente
+    If validCount = 0 Then
+        MsgBox "Nessuna zona di carico con mezzi completati oggi.", vbInformation
+        Exit Sub
+    End If
+    
+    ' 2. Ordinamento (Bubble Sort) - Ordina in ordine decrescente per conteggio
+    For i = 1 To validCount - 1
+        For j = i + 1 To validCount
+            If counts(j) > counts(i) Then
+                ' Scambia conteggi
+                tempCount = counts(i)
+                counts(i) = counts(j)
+                counts(j) = tempCount
+                
+                ' Scambia nomi
+                tempName = zones(i)
+                zones(i) = zones(j)
+                zones(j) = tempName
+            End If
+        Next j
+    Next i
+    
+    ' 3. Scrittura dei risultati nel foglio STATS S. a partire da W49
+    For k = 1 To validCount
+        ' Scrive il nome della zona in colonna W (23)
+        wsStats.Cells(48 + k, 23).Value = zones(k)
+        
+        ' Scrive il numero di camion in colonna X (24)
+        wsStats.Cells(48 + k, 24).Value = counts(k)
+        
+        ' NOTA: Rimossa la scrittura della formula in colonna Y come richiesto
+    Next k
+    
+    MsgBox "Classifica Zone Aggiornata!", vbInformation
+    Exit Sub
+
+GestoreErrore:
+    MsgBox "Errore: " & Err.Description, vbCritical
+End Sub
+```
+
+### Modifiche apportate:
+1.  **Rimossa Colonna Y**: La macro ora scrive solo in **W** (Nome Zona) e **X** (Nr. Camion). La colonna Y nel foglio `STATS S.` rimarrà vuota o potrà essere usata per altri dati manuali.
+2.  **Filtro "MULTIZONA"**: Ho aggiunto un controllo `If UCase(zonaNome) <> "MULTIZONA"` per assicurarsi che, se per qualche motivo la parola "MULTIZONA" rimanesse nella colonna P senza essere sostituita dai nomi reali delle zone, non venga conteggiata come una zona a sé stante.
+3.  **Range di Lettura**: Il ciclo `For i = 2 To lastRow` (dove `lastRow = 202`) copre tutte le righe dove possono essere scritti i dati, inclusi quelli provenienti dalla gestione multizona se questi vengono scritti nelle colonne P ed L standard.
+
+### Nota sulla Colonna R (Menù a tendina / Note):
+Hai menzionato la colonna **R** (`R2:R202`). Nel codice VBA che hai incollato, la colonna R non viene esplicitamente scritta dalla macro `MULTIZONA`, ma spesso in questi sistemi la colonna R contiene note o conferme.
+*   Se la colonna **R** contiene dati che *devono* essere presenti per considerare il carico "valido" (es. una conferma), dimmelo e aggiungerò `And wsEntrate.Cells(i, 18).Value <> ""` alla condizione `If`.
+*   Al momento, ho mantenuto la logica basata su **P (Zona)** e **L (Spuntatore)** come richiesto inizialmente, poiché sono i dati certi di uscita/carico completato.
+
+Ora la macro dovrebbe generare una lista pulita in **W49:X73** con le zone più affollate in ordine decrescente.
+
+### USER
+Ok ora funziona, ma non becca il MULTIZONA perchè aggiunge i nomi delle zone multiple nel range R2:R202 se c'è più di una zona nella cella R le separa tra loro con | Inoltre c'è un'altra cosa che vorrei affinare per quanto riguarda la media di carico per singolo spuntatore, ma al momento non ho idea di come fare:
+Attualmente la media non tiene conto della pausa pranzo che è di 90 minuti, infatti per i mezzi che arrivano dalle 11.30 e che non escono prima delle 13.00 hanno un tempo così lungo di carico perché in mezzo c'è la pausa, che però non va conteggiata. Come potremmo affrontare questo problema?
+
+### ASSISTANT
+Perfetto! Affrontiamo entrambi i problemi:
+
+## 1. Macro Aggiornata per MULTIZONA (Colonna R)
+
+Ecco la macro modificata che legge le zone multiple dalla colonna R (separate da "|"):
+
+```vba
+Sub AggiornaTopZoneCarico()
+    Dim wsEntrate As Worksheet
+    Dim wsStats As Worksheet
+    Dim lastRow As Long
+    Dim i As Long, j As Long, k As Long, n As Long
+    Dim zonaNome As String
+    Dim spuntatore As String
+    Dim tempName As String
+    Dim tempCount As Integer
+    Dim zoneCell As String
+    Dim zoneArray() As String
+    
+    On Error GoTo GestoreErrore
+    
+    Set wsEntrate = ThisWorkbook.Sheets("ENTRATE")
+    Set wsStats = ThisWorkbook.Sheets("STATS S.")
+    
+    If wsStats.ProtectContents Then wsStats.Unprotect Password:=""
+    wsStats.Range("W49:X73").ClearContents
+    
+    Dim zones(1 To 50) As String
+    Dim counts(1 To 50) As Integer
+    Dim validCount As Integer
+    Dim found As Boolean
+    
+    validCount = 0
+    lastRow = 202
+    
+    For i = 2 To lastRow
+        zonaNome = Trim(wsEntrate.Cells(i, 16).Value) ' Colonna P
+        spuntatore = Trim(wsEntrate.Cells(i, 12).Value) ' Colonna L
+        
+        If zonaNome <> "" And spuntatore <> "" Then
+            ' GESTIONE MULTIZONA - Legge dalla colonna R
+            If UCase(zonaNome) = "MULTIZONA" Then
+                zoneCell = Trim(wsEntrate.Cells(i, 18).Value) ' Colonna R
+                
+                If zoneCell <> "" Then
+                    ' Separa le zone usando il carattere |
+                    zoneArray = Split(zoneCell, "|")
+                    
+                    For n = LBound(zoneArray) To UBound(zoneArray)
+                        zonaNome = Trim(zoneArray(n))
+                        
+                        If zonaNome <> "" And UCase(zonaNome) <> "MULTIZONA" Then
+                            found = False
+                            For j = 1 To validCount
+                                If zones(j) = zonaNome Then
+                                    counts(j) = counts(j) + 1
+                                    found = True
+                                    Exit For
+                                End If
+                            Next j
+                            
+                            If Not found Then
+                                validCount = validCount + 1
+                                zones(validCount) = zonaNome
+                                counts(validCount) = 1
+                            End If
+                        End If
+                    Next n
+                End If
+            Else
+                ' Zona singola normale
+                found = False
+                For j = 1 To validCount
+                    If zones(j) = zonaNome Then
+                        counts(j) = counts(j) + 1
+                        found = True
+                        Exit For
+                    End If
+                Next j
+                
+                If Not found Then
+                    validCount = validCount + 1
+                    zones(validCount) = zonaNome
+                    counts(validCount) = 1
+                End If
+            End If
+        End If
+    Next i
+    
+    If validCount = 0 Then
+        MsgBox "Nessuna zona di carico con mezzi completati oggi.", vbInformation
+        Exit Sub
+    End If
+    
+    ' Ordinamento decrescente
+    For i = 1 To validCount - 1
+        For j = i + 1 To validCount
+            If counts(j) > counts(i) Then
+                tempCount = counts(i)
+                counts(i) = counts(j)
+                counts(j) = tempCount
+                
+                tempName = zones(i)
+                zones(i) = zones(j)
+                zones(j) = tempName
+            End If
+        Next j
+    Next i
+    
+    ' Scrittura risultati
+    For k = 1 To validCount
+        wsStats.Cells(48 + k, 23).Value = zones(k)
+        wsStats.Cells(48 + k, 24).Value = counts(k)
+    Next k
+    
+    MsgBox "Classifica Zone Aggiornata!", vbInformation
+    Exit Sub
+
+GestoreErrore:
+    MsgBox "Errore: " & Err.Description, vbCritical
+End Sub
+```
+
+## 2. Soluzione Pausa Pranzo (11:30 - 13:00)
+
+Per calcolare correttamente il tempo di carico escludendo i 90 minuti di pausa, devi modificare la formula nella **colonna AZ** del foglio **ENTRATE**.
+
+### Opzione A: Formula Excel (Consigliata)
+
+Sostituisci la formula attuale in **AZ2** con questa:
+
+```excel
+=SE(E(I2="";K2="");""; 
+   SE(K2=""; 
+      ADESSO()-I2 - CalcolaSovrapposizionePausa(I2;ADESSO()); 
+      K2-I2 - CalcolaSovrapposizionePausa(I2;K2)
+   )
+)
+```
+
+Ma Excel non ha una funzione nativa per questo, quindi ti serve una **funzione VBA personalizzata**.
+
+### Opzione B: Funzione VBA Personalizzata (Migliore)
+
+Aggiungi questo codice in un modulo VBA:
+
+```vba
+Function CalcolaDurataConPausa(oraEntrata As Variant, oraUscita As Variant) As Double
+    ' Calcola la durata in giorni Excel escludendo la pausa pranzo 11:30-13:00 (1.5 ore = 0.0625 giorni)
+    
+    Dim inizioPausa As Double
+    Dim finePausa As Double
+    Dim durata As Double
+    Dim sovrapposizione As Double
+    
+    If IsEmpty(oraEntrata) Or IsEmpty(oraUscita) Then
+        CalcolaDurataConPausa = 0
+        Exit Function
+    End If
+    
+    inizioPausa = TimeValue("11:30")
+    finePausa = TimeValue("13:00")
+    
+    ' Durata totale
+    durata = oraUscita - oraEntrata
+    
+    ' Calcola sovrapposizione con la pausa
+    sovrapposizione = 0
+    
+    ' Caso 1: Entrata e uscita nello stesso giorno
+    If Int(oraEntrata) = Int(oraUscita) Then
+        If oraEntrata < finePausa And oraUscita > inizioPausa Then
+            sovrapposizione = Application.WorksheetFunction.Min(oraUscita, finePausa) - _
+                              Application.WorksheetFunction.Max(oraEntrata, inizioPausa)
+        End If
+    Else
+        ' Caso 2: Attraversa mezzanotte o più giorni
+        ' Per semplicità, sottraiamo la pausa solo se il carico inizia prima delle 13:00
+        ' e finisce dopo le 11:30 del giorno successivo
+        If TimeValue(oraEntrata) < finePausa Then
+            sovrapposizione = finePausa - Application.WorksheetFunction.Max(TimeValue(oraEntrata), inizioPausa)
+        End If
+        If TimeValue(oraUscita) > inizioPausa Then
+            sovrapposizione = sovrapposizione + Application.WorksheetFunction.Min(TimeValue(oraUscita), finePausa) - inizioPausa
+        End If
+    End If
+    
+    ' Assicurati che la sovrapposizione non sia negativa
+    If sovrapposizione < 0 Then sovrapposizione = 0
+    
+    CalcolaDurataConPausa = durata - sovrapposizione
+End Function
+```
+
+Poi nel foglio **ENTRATE**, cella **AZ2**, usa:
+
+```excel
+=SE(E(I2="";K2="");""; SE(K2=""; CalcolaDurataConPausa(I2;ADESSO()); CalcolaDurataConPausa(I2;K2)))
+```
+
+### Opzione C: Modifica Diretta Formula Media.SE (Più Semplice)
+
+Se non vuoi modificare la colonna AZ, puoi correggere direttamente la formula della media nel foglio **STATS S.** creando una funzione che calcola la media già corretta:
+
+```vba
+Function MediaTempoCaricoSpuntatore(abbreviazione As String) As String
+    Dim wsEntrate As Worksheet
+    Dim i As Long
+    Dim totaleDurata As Double
+    Dim conteggio As Integer
+    Dim durata As Double
+    
+    Set wsEntrate = ThisWorkbook.Sheets("ENTRATE")
+    totaleDurata = 0
+    conteggio = 0
+    
+    For i = 2 To 202
+        If Trim(wsEntrate.Cells(i, 12).Value) = abbreviazione And _
+           Not IsEmpty(wsEntrate.Cells(i, 9).Value) And _
+           Not IsEmpty(wsEntrate.Cells(i, 11).Value) Then
+            
+            durata = wsEntrate.Cells(i, 52).Value ' Colonna AZ
+            ' Sottrai 1.5 ore (0.0625 giorni) se il carico attraversa la pausa
+            If TimeValue(wsEntrate.Cells(i, 9).Value) < TimeValue("13:00") And _
+               TimeValue(wsEntrate.Cells(i, 11).Value) > TimeValue("11:30") Then
+                durata = durata - TimeValue("01:30")
+            End If
+            
+            totaleDurata = totaleDurata + durata
+            conteggio = conteggio + 1
+        End If
+    Next i
+    
+    If conteggio > 0 Then
+        MediaTempoCaricoSpuntatore = totaleDurata / conteggio
+    Else
+        MediaTempoCaricoSpuntatore = 0
+    End If
+End Function
+```
+
+Poi nel foglio **STATS S.** usa: `=MediaTempoCaricoSpuntatore(F7)` invece di `MEDIA.SE`.
+
+**Quale approccio preferisci?** Ti consiglio l'**Opzione B** (modifica colonna AZ) perché è la più pulita e riutilizzabile ovunque.
+
+### USER
+```
+Ti consiglio l'Opzione B (modifica colonna AZ) perché è la più pulita e riutilizzabile ovunque.
+```
+Ok va bene adottiamo questa strategia, ma cambiando l'orario della pausa pranzo che vorrei fosse incluso negli orari: 12:00 - 13:30 
+Oltre a questo vorrei capire come dovrebbe reagire lo schema, se tutto funziona come deve? 
+Ragioniamo su un esempio ora entrata 12:02 uscita 14:09 
+
+### ASSISTANT
+Perfetto. Adottiamo l'**Opzione B** con la pausa pranzo dalle **12:00 alle 13:30**.
+
+Ecco come deve reagire lo schema e il codice necessario.
+
+### 1. Ragionamento sull'Esempio (12:02 - 14:09)
+
+Se un camion entra alle **12:02** ed esce alle **14:09**:
+*   **Tempo Reale Trascorso:** 2 ore e 7 minuti.
+*   **Sovrapposizione Pausa:** La pausa è dalle 12:00 alle 13:30. Il camion è presente in magazzino durante tutta la pausa (o quasi).
+    *   Inizio sovrapposizione: Max(Entrata, Inizio Pausa) = Max(12:02, 12:00) = **12:02**.
+    *   Fine sovrapposizione: Min(Uscita, Fine Pausa) = Min(14:09, 13:30) = **13:30**.
+    *   Durata Pausa da sottrarre: 13:30 - 12:02 = **1 ora e 28 minuti**.
+*   **Tempo di Carico Effettivo (Colonna AZ):**
+    *   2h 07m - 1h 28m = **39 minuti**.
+
+Quindi, nella cella **AZ**, dovresti vedere **0:39** (o formato simile), non 2:07. Questo dato verrà poi usato per le medie degli spuntatori, rendendo le statistiche reali e non penalizzate dalla pausa.
+
+---
+
+### 2. Implementazione Tecnica
+
+Devi fare due cose: aggiungere una Funzione VBA e modificare la formula nel foglio ENTRATE.
+
+#### Passo A: Inserisci la Funzione VBA
+Apri l'editor VBA (`ALT + F11`), vai su `Inserisci` > `Modulo` (o usa un modulo esistente come Modulo1) e incolla questo codice:
+
+```vba
+Function CalcolaDurataNetta(oraEntrata As Variant, oraUscita As Variant) As Double
+    ' Calcola la durata escludendo la pausa pranzo 12:00 - 13:30
+    ' Restituisce il valore in giorni Excel
+    
+    Dim inizioPausa As Double
+    Dim finePausa As Double
+    Dim durataTotale As Double
+    Dim sovrapposizione As Double
+    Dim inizioOverlap As Double
+    Dim fineOverlap As Double
+    
+    ' Se mancano dati, restituisci 0
+    If IsEmpty(oraEntrata) Or IsEmpty(oraUscita) Then
+        CalcolaDurataNetta = 0
+        Exit Function
+    End If
+    
+    ' Definizione orari pausa (12:00 e 13:30)
+    inizioPausa = TimeValue("12:00")
+    finePausa = TimeValue("13:30")
+    
+    ' Durata totale lorda
+    durataTotale = oraUscita - oraEntrata
+    
+    ' Calcolo sovrapposizione con la pausa
+    sovrapposizione = 0
+    
+    ' Assumiamo che entrata e uscita siano nello stesso giorno lavorativo per semplicità statistica giornaliera
+    ' Se l'uscita è prima dell'inizio pausa o entrata dopo fine pausa, sovrapposizione è 0
+    If oraUscita <= inizioPausa Or oraEntrata >= finePausa Then
+        sovrapposizione = 0
+    Else
+        ' Calcola l'intersezione temporale
+        inizioOverlap = Application.WorksheetFunction.Max(TimeValue(oraEntrata), inizioPausa)
+        fineOverlap = Application.WorksheetFunction.Min(TimeValue(oraUscita), finePausa)
+        
+        If fineOverlap > inizioOverlap Then
+            sovrapposizione = fineOverlap - inizioOverlap
+        End If
+    End If
+    
+    ' Risultato netto
+    CalcolaDurataNetta = durataTotale - sovrapposizione
+    
+    ' Evita risultati negativi per errori di inserimento orari
+    If CalcolaDurataNetta < 0 Then CalcolaDurataNetta = 0
+    
+End Function
+```
+
+#### Passo B: Modifica la Formula in Colonna AZ (Foglio ENTRATE)
+Vai nel foglio **ENTRATE**, cella **AZ2** (e trascina verso il basso fino alla 202).
+Sostituisci la formula attuale con questa:
+
+```excel
+=SE(E(I2="";K2="");""; SE(K2=""; CalcolaDurataNetta(I2;ADESSO()); CalcolaDurataNetta(I2;K2)))
+```
+
+**Nota importante sulla formattazione:**
+Assicurati che le celle della colonna **AZ** siano formattate come `[h]:mm:ss`. In questo modo vedrai correttamente i minuti (es. `0:39:00`).
+
+---
+
+### 3. Come verifica se funziona?
+
+1.  Inserisci in una riga di test (es. riga 2):
+    *   **I2 (Entrata):** `12:02`
+    *   **L2 (Spuntatore):** `CLA` (o qualsiasi abbreviazione valida per sbloccare l'uscita)
+    *   **K2 (Uscita):** `14:09`
+2.  Controlla la cella **AZ2**.
+3.  Dovrebbe apparire **0:39:00** (39 minuti).
+4.  Se vedi `2:07:00`, c'è un errore nella funzione VBA o nella formattazione.
+5.  Se vedi `#NOME?`, significa che Excel non trova la funzione `CalcolaDurataNetta`. Assicurati di aver salvato il file come **.xlsm** (Macro-enabled) e che il codice sia in un Modulo standard, non nel foglio di lavoro.
+
+Una volta verificato questo, le tue statistiche nel foglio **STATS S.** (Tempo Medio per Spuntatore) si aggiorneranno automaticamente usando questo nuovo valore "netto", eliminando il distorsione dei 90 minuti di pausa.
+
+### USER
+```
+Se vedi 2:07:00, c'è un errore nella funzione VBA o nella formattazione.
+```
+Purtroppo in cella AZ vedo 2:07 la formattazione della cella è [h]:mm 
+- Il file schema entrate da duplicare ha il formato .xlsm 
+- La macro CalcolaDurataNetta è inserita nel modulo 15
+- Scrivendo =CalcolaDurataNetta in cella la funzione mi viene suggerita
+- Se inserisco nella cella =CalcolaDurataNetta(I2;K2) ricevo un calcolo sbagliato cioè 2:07
+Temo che sia il codice il problema, così non conteggia in modo appropriato in quanto non sottrae la pausa.
+
+### ASSISTANT
+Hai ragione, il problema è nel codice VBA. La funzione `TimeValue` estrae solo l'orario, ma se le celle `I2` e `K2` contengono **Data + Ora** (es. `30/04/2026 12:02`), la sottrazione diretta `oraUscita - oraEntrata` funziona correttamente per la durata totale, ma il calcolo della sovrapposizione con `TimeValue` potrebbe non allinearsi perfettamente se ci sono differenze di data o se Excel interpreta i valori in modo diverso.
+
+Inoltre, c'è un errore logico sottile: se `oraEntrata` e `oraUscita` sono valori completi (Data+Ora), usare `TimeValue` su di essi restituisce solo la parte oraria come frazione di giorno (es. 0,5 per le 12:00). Ma la variabile `durataTotale = oraUscita - oraEntrata` è corretta. Il problema è che stiamo confrontando `TimeValue(oraEntrata)` con `inizioPausa` (che è pure una frazione di giorno), il che dovrebbe funzionare.
+
+Tuttavia, per essere sicuri al 100% e gestire anche casi limite (es. mezzi entrati prima delle 12:00 e usciti dopo le 13:30), riscriviamo la funzione in modo più robusto usando direttamente i valori numerici di Excel senza convertire in `TimeValue` dove non necessario.
+
+### Codice VBA Corretto e Robusto
+
+Sostituisci la funzione esistente nel **Modulo 15** con questa versione aggiornata:
+
+```vba
+Function CalcolaDurataNetta(oraEntrata As Variant, oraUscita As Variant) As Double
+    ' Calcola la durata netta escludendo la pausa pranzo 12:00 - 13:30
+    ' I parametri devono essere valori orari Excel (es. 0,5 per 12:00)
+    
+    Dim inizioPausa As Double
+    Dim finePausa As Double
+    Dim durataTotale As Double
+    Dim sovrapposizione As Double
+    
+    ' Se mancano dati, restituisci 0
+    If IsEmpty(oraEntrata) Or IsEmpty(oraUscita) Then
+        CalcolaDurataNetta = 0
+        Exit Function
+    End If
+    
+    ' Verifica che siano numeri validi
+    If Not IsNumeric(oraEntrata) Or Not IsNumeric(oraUscita) Then
+        CalcolaDurataNetta = 0
+        Exit Function
+    End If
+    
+    ' Definizione orari pausa (12:00 = 0,5; 13:30 = 0,5625)
+    ' Usiamo TimeValue per ottenere la frazione di giorno corretta
+    inizioPausa = TimeValue("12:00")
+    finePausa = TimeValue("13:30")
+    
+    ' Durata totale lorda
+    durataTotale = oraUscita - oraEntrata
+    
+    ' Se la durata è negativa (errore inserimento), restituisci 0
+    If durataTotale < 0 Then
+        CalcolaDurataNetta = 0
+        Exit Function
+    End If
+    
+    ' Calcolo sovrapposizione con la pausa
+    ' Estraiamo solo la parte oraria (frazione di giorno) da entrata e uscita
+    Dim oraEntrataFrac As Double
+    Dim oraUscitaFrac As Double
+    
+    oraEntrataFrac = oraEntrata - Int(oraEntrata) ' Rimuove la data, tiene solo l'ora
+    oraUscitaFrac = oraUscita - Int(oraUscita)     ' Rimuove la data, tiene solo l'ora
+    
+    sovrapposizione = 0
+    
+    ' Controlla se c'è sovrapposizione con la fascia 12:00-13:30
+    ' Caso 1: Entrata prima della fine pausa E Uscita dopo l'inizio pausa
+    If oraEntrataFrac < finePausa And oraUscitaFrac > inizioPausa Then
+        ' Calcola l'intersezione
+        Dim inizioOverlap As Double
+        Dim fineOverlap As Double
+        
+        inizioOverlap = Application.WorksheetFunction.Max(oraEntrataFrac, inizioPausa)
+        fineOverlap = Application.WorksheetFunction.Min(oraUscitaFrac, finePausa)
+        
+        If fineOverlap > inizioOverlap Then
+            sovrapposizione = fineOverlap - inizioOverlap
+        End If
+    End If
+    
+    ' Risultato netto
+    CalcolaDurataNetta = durataTotale - sovrapposizione
+    
+    ' Evita risultati negativi
+    If CalcolaDurataNetta < 0 Then CalcolaDurataNetta = 0
+    
+End Function
+```
+
+### Cosa è cambiato:
+1.  **Estrazione Frazione Oraria**: Invece di usare `TimeValue(oraEntrata)` (che può dare problemi se la cella contiene testo o formati strani), usiamo `oraEntrata - Int(oraEntrata)`. Questo è matematicamente più sicuro in Excel per isolare la parte oraria da un valore Data+Ora.
+2.  **Controlli di Validità**: Aggiunti controlli `IsNumeric` per evitare errori se le celle sono vuote o contengono testo.
+3.  **Logica Sovrapposizione**: La condizione `If oraEntrataFrac < finePausa And oraUscitaFrac > inizioPausa` assicura che calcoliamo la sovrapposizione solo se il carico "attraversa" effettivamente la finestra della pausa.
+
+### Test di Verifica
+Dopo aver incollato il nuovo codice:
+1.  Salva il file (`CTRL + S`).
+2.  Vai nella cella di test con `12:02` in I2 e `14:09` in K2.
+3.  Ricalcola la formula in AZ2 (clicca sulla cella e premi Invio, oppure `F9` per ricalcolare tutto).
+4.  Dovresti vedere **0:39**.
+
+Se vedi ancora **2:07**, significa che Excel sta usando una versione vecchia della funzione salvata in cache. Per forzare l'aggiornamento:
+*   Chiudi e riapri il file.
+*   Oppure cambia temporaneamente il nome della funzione in `CalcolaDurataNettaV2` sia nel VBA che nella formula Excel.
+
+Fammi sapere se ora funziona!
+
+### USER
+```
+Passo 1: Creare un Database Storico ("DB_STORICO")
+```
+Ok iniziamo a dedicarci su questo.
+
+### ASSISTANT
+Ottimo. Creare un **Database Storico** è il passo fondamentale per trasformare il tuo sistema da "giornaliero" a "strategico", permettendoti di analizzare trend settimanali, mensili e annuali.
+
+Ecco la procedura strutturata per implementare il `DB_STORICO` in modo sicuro ed efficiente.
+
+### 1. Struttura del Foglio "DB_STORICO"
+
+Crea un nuovo foglio nel file **Generatore Schema Entrate** (o in un file Excel separato dedicato all'archivio se preferisci tenere i dati storici staccati dai processi giornalieri) chiamato `DB_STORICO`.
+
+Imposta questa intestazione nella **Riga 1**:
+
+| Colonna | Intestazione | Descrizione |
+| :--- | :--- | :--- |
+| **A** | DATA_GIORNALIERA | La data del file giornaliero elaborato |
+| **B** | TARGA | Targa del mezzo |
+| **C** | VETTORE | Nome del vettore |
+| **D** | CLIENTE | Cliente destinatario |
+| **E** | MERCE | Tipologia merce |
+| **F** | ORA_ENTRATA | Orario di ingresso (valore orario) |
+| **G** | ORA_USCITA | Orario di uscita (valore orario) |
+| **H** | SPUNTATORE | Abbreviazione spuntatore (Colonna L) |
+| **I** | ZONA_CARICO | Zona di carico (Colonna P o R se multizona) |
+| **J** | DURATA_MINUTI | Durata netta in minuti (calcolata dalla macro) |
+| **K** | STATO | "COMPLETATO" o "PENDENTE" |
+| **L** | NOTE | Eventuali note (Colonna Q) |
+
+---
+
+### 2. Macro VBA per l'Archiviazione Automatica
+
+Questa macro deve essere inserita nel file **Generatore Schema Entrate**. Il momento migliore per eseguirla è **prima** che il generatore chiuda il file giornaliero appena creato, oppure come passo finale della generazione.
+
+**Logica:**
+1.  Apre temporaneamente il file `Schema Entrate [Data].xlsm` appena generato.
+2.  Legge le righe compilate (dalla 2 alla 202).
+3.  Copia i dati rilevanti nel foglio `DB_STORICO`.
+4.  Calcola la durata in minuti usando la logica della pausa pranzo (12:00-13:30).
+5.  Salva e chiude il file storico.
+
+#### Codice VBA (Da inserire nel Modulo del Generatore)
+
+```vba
+Sub ArchiviaDatiGiornalieri(PercorsoFileGiornaliero As String, DataRiferimento As Date)
+    Dim wbGiornaliero As Workbook
+    Dim wsEntrate As Worksheet
+    Dim wsStorico As Worksheet
+    Dim lastRowStorico As Long
+    Dim i As Long, j As Long
+    Dim zonaNome As String
+    Dim spuntatore As String
+    Dim oraEntrata As Variant
+    Dim oraUscita As Variant
+    Dim durataMinuti As Double
+    
+    ' Disattiva aggiornamenti schermo per velocità
+    Application.ScreenUpdating = False
+    Application.Calculation = xlCalculationManual
+    
+    On Error GoTo GestoreErrore
+    
+    ' Apri il file giornaliero in sola lettura/background
+    Set wbGiornaliero = Workbooks.Open(Filename:=PercorsoFileGiornaliero, ReadOnly:=True, UpdateLinks:=False)
+    Set wsEntrate = wbGiornaliero.Sheets("ENTRATE")
+    
+    ' Riferimento al foglio DB_STORICO (presumibilmente nel file Generatore o in un file Archivio aperto)
+    ' Assumiamo che DB_STORICO sia nel file dove risiede questa macro (Generatore)
+    Set wsStorico = ThisWorkbook.Sheets("DB_STORICO")
+    
+    ' Trova l'ultima riga libera nello storico
+    lastRowStorico = wsStorico.Cells(wsStorico.Rows.Count, "A").End(xlUp).Row + 1
+    
+    ' Ciclo attraverso le righe dello schema entrate (2 to 202)
+    For i = 2 To 202
+        ' Controlla se c'è una targa (indicatore di riga valida)
+        If Trim(wsEntrate.Cells(i, 1).Value) <> "" Then
+            
+            ' Recupera dati base
+            oraEntrata = wsEntrate.Cells(i, 9).Value  ' Colonna I
+            oraUscita = wsEntrate.Cells(i, 11).Value   ' Colonna K
+            spuntatore = Trim(wsEntrate.Cells(i, 12).Value) ' Colonna L
+            zonaNome = Trim(wsEntrate.Cells(i, 16).Value)   ' Colonna P
+            
+            ' Gestione Multizona: Se P è "MULTIZONA", leggi da R
+            If UCase(zonaNome) = "MULTIZONA" Then
+                zonaNome = Trim(wsEntrate.Cells(i, 18).Value) ' Colonna R
+                ' Se ci sono più zone separate da |, potresti volerle salvare tutte in una cella
+                ' o creare righe multiple. Per semplicità storica, salviamo la stringa completa.
+            End If
+            
+            ' Calcolo Durata in Minuti (usando la logica già testata)
+            durataMinuti = 0
+            If Not IsEmpty(oraEntrata) And Not IsEmpty(oraUscita) Then
+                ' Chiama la funzione CalcolaDurataNetta se è disponibile nel Generatore, 
+                ' altrimenti usa una logica semplificata qui per evitare dipendenze
+                ' Nota: È meglio avere la funzione CalcolaDurataNetta anche nel Generatore
+                durataMinuti = CalcolaDurataNetta(oraEntrata, oraUscita) * 1440 ' Converti giorni in minuti
+            ElseIf Not IsEmpty(oraEntrata) And IsEmpty(oraUscita) Then
+                ' Se ancora dentro, calcola fino ad ADESSO() o lascia vuoto? 
+                ' Per lo storico, di solito si archiviano solo i completati, oppure si segna come PENDENTE
+                durataMinuti = -1 ' Codice per pendente
+            End If
+            
+            ' Scrivi i dati nel DB_STORICO
+            With wsStorico
+                .Cells(lastRowStorico, 1).Value = DataRiferimento       ' Data Giornaliera
+                .Cells(lastRowStorico, 2).Value = wsEntrate.Cells(i, 1).Value ' Targa
+                .Cells(lastRowStorico, 3).Value = wsEntrate.Cells(i, 2).Value ' Vettore
+                .Cells(lastRowStorico, 4).Value = wsEntrate.Cells(i, 3).Value ' Cliente
+                .Cells(lastRowStorico, 5).Value = wsEntrate.Cells(i, 4).Value ' Merce
+                .Cells(lastRowStorico, 6).Value = oraEntrata            ' Ora Entrata
+                .Cells(lastRowStorico, 7).Value = oraUscita             ' Ora Uscita
+                .Cells(lastRowStorico, 8).Value = spuntatore            ' Spuntatore
+                .Cells(lastRowStorico, 9).Value = zonaNome              ' Zona
+                .Cells(lastRowStorico, 10).Value = durataMinuti         ' Durata Minuti
+                .Cells(lastRowStorico, 11).Value = IIf(IsEmpty(oraUscita), "PENDENTE", "COMPLETATO") ' Stato
+                .Cells(lastRowStorico, 12).Value = wsEntrate.Cells(i, 17).Value ' Note (Col Q)
+            End With
+            
+            lastRowStorico = lastRowStorico + 1
+        End If
+    Next i
+    
+    ' Chiudi il file giornaliero senza salvare modifiche
+    wbGiornaliero.Close SaveChanges:=False
+    
+    MsgBox "Dati giornalieri archiviati con successo!", vbInformation
+    
+    Exit Sub
+
+GestoreErrore:
+    MsgBox "Errore durante l'archiviazione: " & Err.Description, vbCritical
+    If Not wbGiornaliero Is Nothing Then wbGiornaliero.Close SaveChanges:=False
+End Sub
+
+' Funzione di supporto per il calcolo durata (copia anche questa nel Generatore)
+Function CalcolaDurataNetta(oraEntrata As Variant, oraUscita As Variant) As Double
+    Dim inizioPausa As Double, finePausa As Double
+    Dim durataTotale As Double, sovrapposizione As Double
+    Dim oraEntrataFrac As Double, oraUscitaFrac As Double
+    
+    If IsEmpty(oraEntrata) Or IsEmpty(oraUscita) Then CalcolaDurataNetta = 0: Exit Function
+    If Not IsNumeric(oraEntrata) Or Not IsNumeric(oraUscita) Then CalcolaDurataNetta = 0: Exit Function
+    
+    inizioPausa = TimeValue("12:00"): finePausa = TimeValue("13:30")
+    durataTotale = oraUscita - oraEntrata
+    If durataTotale < 0 Then CalcolaDurataNetta = 0: Exit Function
+    
+    oraEntrataFrac = oraEntrata - Int(oraEntrata)
+    oraUscitaFrac = oraUscita - Int(oraUscita)
+    
+    sovrapposizione = 0
+    If oraEntrataFrac < finePausa And oraUscitaFrac > inizioPausa Then
+        Dim inizioOverlap As Double, fineOverlap As Double
+        inizioOverlap = Application.WorksheetFunction.Max(oraEntrataFrac, inizioPausa)
+        fineOverlap = Application.WorksheetFunction.Min(oraUscitaFrac, finePausa)
+        If fineOverlap > inizioOverlap Then sovrapposizione = fineOverlap - inizioOverlap
+    End If
+    
+    CalcolaDurataNetta = durataTotale - sovrapposizione
+    If CalcolaDurataNetta < 0 Then CalcolaDurataNetta = 0
+End Function
+```
+
+---
+
+### 3. Integrazione nel Processo di Generazione
+
+Nel tuo file **Generatore Schema Entrate**, devi chiamare questa macro subito dopo aver creato il file giornaliero e prima di chiuderlo (o subito dopo averlo chiuso, passandogli il percorso).
+
+Se usi una macro `GeneraSchema` esistente, aggiungi queste righe verso la fine:
+
+```vba
+' ... codice esistente che crea e salva il file giornaliero ...
+Dim PercorsoNuovoFile As String
+Dim DataOggi As Date
+
+PercorsoNuovoFile = "C:\Percorso\Dove\Salvi\Schema_Entrate_" & Format(Date, "dd-mm-yyyy") & ".xlsm"
+DataOggi = Date
+
+' Chiama la macro di archiviazione
+Call ArchiviaDatiGiornalieri(PercorsoNuovoFile, DataOggi)
+
+' ... resto del codice ...
+```
+
+### 4. Analisi dei Dati Storici (Report)
+
+Una volta che il `DB_STORICO` si riempie, non usare formule lente su migliaia di righe. Usa le **Tabelle Pivot**:
+
+1.  Seleziona i dati in `DB_STORICO`.
+2.  Inserisci > Tabella Pivot.
+3.  **Report Settimanale:**
+    *   Filtra `DATA_GIORNALIERA` per "Ultimi 7 giorni".
+    *   Righe: `SPUNTATORE`.
+    *   Valori: Media di `DURATA_MINUTI` (formatta come ore/minuti).
+4.  **Report Mensile per Cliente:**
+    *   Filtra `DATA_GIORNALIERA` per il mese corrente.
+    *   Righe: `CLIENTE`.
+    *   Valori: Media di `DURATA_MINUTI` e Conteggio di `TARGA` (per vedere quanti mezzi ha gestito).
+5.  **Report Annuale Zone:**
+    *   Righe: `ZONA_CARICO`.
+    *   Valori: Media di `DURATA_MINUTI`.
+
+Questo approccio ti dà dati puliti, storici e facili da analizzare senza appesantire il file giornaliero operativo.
+
+Vuoi che ti aiuti a integrare la chiamata `Call ArchiviaDatiGiornalieri` nella tua macro `GeneraSchema` esistente?
