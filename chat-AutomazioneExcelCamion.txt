@@ -1,0 +1,745 @@
+### USER
+Buongiorno Qwen, ho uno schema entrate camion nel magazzino realizzato in excel a cui ho aggiunto delle macro per automatizzare alcune azioni. 
+Il foglio 1 del file è così formato: Colonna B (targa), Colonna C (vettore), Colonna F (cliente), Colonna H (merce), Colonna I (ora entrata), Colonna K (ora uscita), Colonna P (zona di carico all'interno del terminal). 
+Di seguito riporto tutto il codice che vi è all'interno del file principale nel foglio 1:
+'''
+Private Sub Worksheet_Change(ByVal Target As Range)
+
+       Dim rng         As Range, cell As Range
+    Dim ordine      As String
+   
+Dim SClients, YFlag As Boolean, I As Long, CCVal
+SClients = Array("EUSIDER", "BIDUE", "METALL STEEL")
+    If Not Intersect(Target, Me.Range("H2:H201")) Is Nothing Then
+        For Each cell In Target
+        'Controlla se cliente speciale:
+            YFlag = False
+            CCVal = Cells(cell.Row, 6).Value & "....."
+            For I = 0 To UBound(SClients)
+                If InStr(1, CCVal, SClients(I), vbTextCompare) > 0 Then
+                    YFlag = True
+                    Exit For
+                End If
+            Next I
+            If YFlag And Not IsEmpty(cell.Value) Then
+                ordine = InputBox("Nr.Ordine Eusider")
+               If ordine <> "" Then
+                    Me.Cells(cell.Row, 15).Value = ordine
+                    If Target.Count = 1 Then
+                        Cells(cell.Row, "P").Select
+                        Exit Sub
+                    End If
+                End If
+            End If
+        Next cell
+    End If
+
+If Target.Count = 1 Then
+    If Not Intersect(Target, Range("B2:P201")) Is Nothing Then
+        Select Case Target.Column
+            Case Is = 2                         'B..
+                Target.Offset(0, 1).Select      '..C
+            Case Is = 3                         'C..
+                Target.Offset(0, 3).Select      '..F
+            Case Is = 6                         'F..
+                Target.Offset(0, 2).Select      '..H
+            Case Is = 8                         'H..
+                'Target.Offset(0, 1).Select      '..I
+            'Case Is = 9                         'I..
+                Target.Offset(0, 8).Select      '..P
+            Case Is = 16                        'P..
+                Target.Offset(1, -14).Select    '..B+1
+        End Select
+    End If
+End If
+
+If Not Intersect(Target, Range("P2:P201")) Is Nothing Then
+    If Application.WorksheetFunction.VLookup(Target.Offset(0, 0), Sheets("Zona di Carico").Range("D4:H24"), 4, False) _
+    > WorksheetFunction.VLookup(Target.Offset(0, 0), Sheets("Zona di Carico").Range("D4:H24"), 5, False) Then
+        MsgBox ("TROPPI CAMION")
+   Application.EnableEvents = True
+   Target.Offset(0, 0) = ""
+   Application.EnableEvents = True
+    End If
+End If
+
+If Target.Count = 1 Then
+    If Target.Column = 2 Then
+        Application.EnableEvents = False
+        Call Pusher(Target.Value, "|", Target.Row)
+        Application.EnableEvents = True
+    End If
+End If
+
+Dim cvArea As String, cvElenco As Range, myCk
+Dim DizArea As Range
+'
+'Parametri>>>:
+cvArea = "H2:H201"                                       'Area Convalidata
+Set cvElenco = Sheets("MERCI").Range("B16:B100")       'Area con le voci di convalida
+Set DizArea = Sheets("MERCI").Range("D2:E50")        'Area del Dizionario
+'
+'Controlla se va fatta la verifica:
+If Target.Count = 1 And (Not Application.Intersect(Target, Range(cvArea)) Is Nothing) Then
+    myCk = Application.WorksheetFunction.CountIf(cvElenco, Target.Value)    'Controlla se l'input e' in elenco
+    If myCk = 0 And Target.Value <> "" Then                                 'Non c'è
+        Application.EnableEvents = False
+        myCk = Application.VLookup(Target.Value, DizArea, 2, False)         'Cerca.Vert nel dizionario
+        If IsError(myCk) Then                                               'Non c'è:
+            With cvElenco.Cells(1, 1).End(xlDown).Offset(1, 0)              'Va in fondo all'elenco...
+                .Value = Target.Value                                       '...ci aggiunge quel valore
+                .Interior.Color = RGB(255, 200, 200)                        '...e lo coloora in rossastro
+            End With
+        Else                                                                'Se trova quella voce...
+            Target.Value = myCk                                             '...sostituisce l'input
+        End If
+        Application.EnableEvents = True
+    End If
+End If
+
+Dim myRan As String
+'
+myRan = "L2:L201"       '<<< L'area per i cui cambiamenti viene subito fatto un File Save
+If Not Application.Intersect(Target, Range(myRan)) Is Nothing Then
+    Debug.Print Now, Target.Address
+    ThisWorkbook.Save
+End If
+
+Dim myList
+
+myList = Array("SERBIA", "BOSNIA", "EUROTHENA")
+If Target.Count = 1 Then            '1
+    If Intersect(Target, Range("F2:F201")) Is Nothing Then Exit Sub
+    For I = 0 To UBound(myList)
+        If InStr(1, Cells(Target.Row, 6).Value, myList(I), vbTextCompare) > 0 Then
+            Cells(Target.Row, 14).Value = "PRECEDENZA T1"
+            Exit For
+        End If
+    Next I
+End If
+
+End Sub
+
+Private Sub Worksheet_BeforeDoubleClick(ByVal Target As Range, Cancel As Boolean)
+
+ThisWorkbook.Save
+'
+If Target.Column <> 16 Then Exit Sub        '16=P
+Select Case Target.Value
+Case "2"
+        'Imposta il foglio da usare:
+    Set mySh = Workbooks("MAPPA.MAG.ESTERNI.xlsx").Sheets("STR.2")
+    'Rimuovi il textbox preesistente:
+    On Error Resume Next
+        mySh.Shapes("SHPPippa").Delete
+    On Error GoTo 0
+ '
+    With mySh
+        'Aggiungi textbox e imposta posizione, nome e orientation:
+        .Shapes.AddTextbox(msoTextOrientationHorizontal, 498, 406.5, 20.25, _
+        93.75).Select
+        .Shapes(mySh.Shapes.Count).Name = "SHPPippa"
+        
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Size = 14
+        .Shapes("SHPPippa").TextFrame2.Orientation = msoTextOrientationUpward
+        .Shapes("SHPPippa").TextFrame2.TextRange.ParagraphFormat.Alignment = _
+        msoAlignCenter
+        .Shapes("SHPPippa").TextFrame2.VerticalAnchor = msoAnchorMiddle
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Bold = msoTrue
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Fill.ForeColor.RGB = RGB(255, 0, 0)
+        'scrivici la targa:
+        .Shapes("SHPPippa").TextFrame.Characters.Text = Target.Offset(0, -14).Value
+        'manda in stampa:
+        .PrintOut    '<<<
+    End With
+Case "STR.3"
+'Imposta il foglio da usare:
+    Set mySh = Workbooks("MAPPA.MAG.ESTERNI.xlsx").Sheets("STR.3")
+    'Rimuovi il textbox preesistente:
+    On Error Resume Next
+        mySh.Shapes("SHPPippa").Delete
+    On Error GoTo 0
+ '
+    With mySh
+        'Aggiungi textbox e imposta posizione, nome e orientation:
+        .Shapes.AddTextbox(msoTextOrientationHorizontal, 498, 406.5, 20.25, _
+        93.75).Select
+        .Shapes(mySh.Shapes.Count).Name = "SHPPippa"
+        
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Size = 14
+        .Shapes("SHPPippa").TextFrame2.Orientation = msoTextOrientationUpward
+        .Shapes("SHPPippa").TextFrame2.TextRange.ParagraphFormat.Alignment = _
+        msoAlignCenter
+        .Shapes("SHPPippa").TextFrame2.VerticalAnchor = msoAnchorMiddle
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Bold = msoTrue
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Fill.ForeColor.RGB = RGB(255, 0, 0)
+        'scrivici la targa:
+        .Shapes("SHPPippa").TextFrame.Characters.Text = Target.Offset(0, -14).Value
+        'manda in stampa:
+        .PrintOut    '<<<
+    End With
+Case "3/PICKING"
+        'Imposta il foglio da usare:
+    Set mySh = Workbooks("MAPPA.MAG.ESTERNI.xlsx").Sheets("STR.3")
+    'Rimuovi il textbox preesistente:
+    On Error Resume Next
+        mySh.Shapes("SHPPippa").Delete
+    On Error GoTo 0
+ '
+    With mySh
+        'Aggiungi textbox e imposta posizione, nome e orientation:
+        .Shapes.AddTextbox(msoTextOrientationHorizontal, 498, 406.5, 20.25, _
+        93.75).Select
+        .Shapes(mySh.Shapes.Count).Name = "SHPPippa"
+        
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Size = 14
+        .Shapes("SHPPippa").TextFrame2.Orientation = msoTextOrientationUpward
+        .Shapes("SHPPippa").TextFrame2.TextRange.ParagraphFormat.Alignment = _
+        msoAlignCenter
+        .Shapes("SHPPippa").TextFrame2.VerticalAnchor = msoAnchorMiddle
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Bold = msoTrue
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Fill.ForeColor.RGB = RGB(255, 0, 0)
+        'scrivici la targa:
+        .Shapes("SHPPippa").TextFrame.Characters.Text = Target.Offset(0, -14).Value
+        'manda in stampa:
+        .PrintOut    '<<<
+    End With
+Case "4"
+        'Imposta il foglio da usare:
+    Set mySh = Workbooks("MAPPA.MAG.ESTERNI.xlsx").Sheets("STR.4")
+    'Rimuovi il textbox preesistente:
+    On Error Resume Next
+        mySh.Shapes("SHPPippa").Delete
+    On Error GoTo 0
+ '
+    With mySh
+        'Aggiungi textbox e imposta posizione, nome e orientation:
+        .Shapes.AddTextbox(msoTextOrientationHorizontal, 498, 406.5, 20.25, _
+        93.75).Select
+        .Shapes(mySh.Shapes.Count).Name = "SHPPippa"
+        
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Size = 14
+        .Shapes("SHPPippa").TextFrame2.Orientation = msoTextOrientationUpward
+        .Shapes("SHPPippa").TextFrame2.TextRange.ParagraphFormat.Alignment = _
+        msoAlignCenter
+        .Shapes("SHPPippa").TextFrame2.VerticalAnchor = msoAnchorMiddle
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Bold = msoTrue
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Fill.ForeColor.RGB = RGB(255, 0, 0)
+        'scrivici la targa:
+        .Shapes("SHPPippa").TextFrame.Characters.Text = Target.Offset(0, -14).Value
+        'manda in stampa:
+        .PrintOut    '<<<
+    End With
+Case "5"
+        'Imposta il foglio da usare:
+    Set mySh = Workbooks("MAPPA.MAG.ESTERNI.xlsx").Sheets("STR.5")
+    'Rimuovi il textbox preesistente:
+    On Error Resume Next
+        mySh.Shapes("SHPPippa").Delete
+    On Error GoTo 0
+ '
+    With mySh
+        'Aggiungi textbox e imposta posizione, nome e orientation:
+        .Shapes.AddTextbox(msoTextOrientationHorizontal, 498, 406.5, 20.25, _
+        93.75).Select
+        .Shapes(mySh.Shapes.Count).Name = "SHPPippa"
+        
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Size = 14
+        .Shapes("SHPPippa").TextFrame2.Orientation = msoTextOrientationUpward
+        .Shapes("SHPPippa").TextFrame2.TextRange.ParagraphFormat.Alignment = _
+        msoAlignCenter
+        .Shapes("SHPPippa").TextFrame2.VerticalAnchor = msoAnchorMiddle
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Bold = msoTrue
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Fill.ForeColor.RGB = RGB(255, 0, 0)
+        'scrivici la targa:
+        .Shapes("SHPPippa").TextFrame.Characters.Text = Target.Offset(0, -14).Value
+        'manda in stampa:
+        .PrintOut    '<<<
+    End With
+Case "6"
+        'Imposta il foglio da usare:
+    Set mySh = Workbooks("MAPPA.MAG.ESTERNI.xlsx").Sheets("STR.6")
+    'Rimuovi il textbox preesistente:
+    On Error Resume Next
+        mySh.Shapes("SHPPippa").Delete
+    On Error GoTo 0
+ '
+    With mySh
+        'Aggiungi textbox e imposta posizione, nome e orientation:
+        .Shapes.AddTextbox(msoTextOrientationHorizontal, 498, 406.5, 20.25, _
+        93.75).Select
+        .Shapes(mySh.Shapes.Count).Name = "SHPPippa"
+        
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Size = 14
+        .Shapes("SHPPippa").TextFrame2.Orientation = msoTextOrientationUpward
+        .Shapes("SHPPippa").TextFrame2.TextRange.ParagraphFormat.Alignment = _
+        msoAlignCenter
+        .Shapes("SHPPippa").TextFrame2.VerticalAnchor = msoAnchorMiddle
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Bold = msoTrue
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Fill.ForeColor.RGB = RGB(255, 0, 0)
+        'scrivici la targa:
+        .Shapes("SHPPippa").TextFrame.Characters.Text = Target.Offset(0, -14).Value
+        'manda in stampa:
+        .PrintOut    '<<<
+    End With
+Case "8"
+        'Imposta il foglio da usare:
+    Set mySh = Workbooks("MAPPA.MAG.ESTERNI.xlsx").Sheets("STR.8")
+    'Rimuovi il textbox preesistente:
+    On Error Resume Next
+        mySh.Shapes("SHPPippa").Delete
+    On Error GoTo 0
+ '
+    With mySh
+        'Aggiungi textbox e imposta posizione, nome e orientation:
+        .Shapes.AddTextbox(msoTextOrientationHorizontal, 498, 406.5, 20.25, _
+        93.75).Select
+        .Shapes(mySh.Shapes.Count).Name = "SHPPippa"
+        
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Size = 14
+        .Shapes("SHPPippa").TextFrame2.Orientation = msoTextOrientationUpward
+        .Shapes("SHPPippa").TextFrame2.TextRange.ParagraphFormat.Alignment = _
+        msoAlignCenter
+        .Shapes("SHPPippa").TextFrame2.VerticalAnchor = msoAnchorMiddle
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Bold = msoTrue
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Fill.ForeColor.RGB = RGB(255, 0, 0)
+        'scrivici la targa:
+        .Shapes("SHPPippa").TextFrame.Characters.Text = Target.Offset(0, -14).Value
+        'manda in stampa:
+        .PrintOut    '<<<
+    End With
+Case "8/CAP1"
+        'Imposta il foglio da usare:
+    Set mySh = Workbooks("MAPPA.MAG.ESTERNI.xlsx").Sheets("STR.8")
+    'Rimuovi il textbox preesistente:
+    On Error Resume Next
+        mySh.Shapes("SHPPippa").Delete
+    On Error GoTo 0
+ '
+    With mySh
+        'Aggiungi textbox e imposta posizione, nome e orientation:
+        .Shapes.AddTextbox(msoTextOrientationHorizontal, 498, 406.5, 20.25, _
+        93.75).Select
+        .Shapes(mySh.Shapes.Count).Name = "SHPPippa"
+        
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Size = 14
+        .Shapes("SHPPippa").TextFrame2.Orientation = msoTextOrientationUpward
+        .Shapes("SHPPippa").TextFrame2.TextRange.ParagraphFormat.Alignment = _
+        msoAlignCenter
+        .Shapes("SHPPippa").TextFrame2.VerticalAnchor = msoAnchorMiddle
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Bold = msoTrue
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Fill.ForeColor.RGB = RGB(255, 0, 0)
+        'scrivici la targa:
+        .Shapes("SHPPippa").TextFrame.Characters.Text = Target.Offset(0, -14).Value
+        'manda in stampa:
+        .PrintOut    '<<<
+    End With
+Case "10"
+        'Imposta il foglio da usare:
+    Set mySh = Workbooks("MAPPA.MAG.ESTERNI.xlsx").Sheets("STR.10")
+    'Rimuovi il textbox preesistente:
+    On Error Resume Next
+        mySh.Shapes("SHPPippa").Delete
+    On Error GoTo 0
+ '
+    With mySh
+        'Aggiungi textbox e imposta posizione, nome e orientation:
+        .Shapes.AddTextbox(msoTextOrientationHorizontal, 498, 406.5, 20.25, _
+        93.75).Select
+        .Shapes(mySh.Shapes.Count).Name = "SHPPippa"
+        
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Size = 14
+        .Shapes("SHPPippa").TextFrame2.Orientation = msoTextOrientationUpward
+        .Shapes("SHPPippa").TextFrame2.TextRange.ParagraphFormat.Alignment = _
+        msoAlignCenter
+        .Shapes("SHPPippa").TextFrame2.VerticalAnchor = msoAnchorMiddle
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Bold = msoTrue
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Fill.ForeColor.RGB = RGB(255, 0, 0)
+        'scrivici la targa:
+        .Shapes("SHPPippa").TextFrame.Characters.Text = Target.Offset(0, -14).Value
+        'manda in stampa:
+        .PrintOut    '<<<
+    End With
+Case "12"
+        'Imposta il foglio da usare:
+    Set mySh = Workbooks("MAPPA.MAG.ESTERNI.xlsx").Sheets("STR.12")
+    'Rimuovi il textbox preesistente:
+    On Error Resume Next
+        mySh.Shapes("SHPPippa").Delete
+    On Error GoTo 0
+ '
+    With mySh
+        'Aggiungi textbox e imposta posizione, nome e orientation:
+        .Shapes.AddTextbox(msoTextOrientationHorizontal, 498, 406.5, 20.25, _
+        93.75).Select
+        .Shapes(mySh.Shapes.Count).Name = "SHPPippa"
+        
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Size = 14
+        .Shapes("SHPPippa").TextFrame2.Orientation = msoTextOrientationUpward
+        .Shapes("SHPPippa").TextFrame2.TextRange.ParagraphFormat.Alignment = _
+        msoAlignCenter
+        .Shapes("SHPPippa").TextFrame2.VerticalAnchor = msoAnchorMiddle
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Bold = msoTrue
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Fill.ForeColor.RGB = RGB(255, 0, 0)
+        'scrivici la targa:
+        .Shapes("SHPPippa").TextFrame.Characters.Text = Target.Offset(0, -14).Value
+        'manda in stampa:
+        .PrintOut    '<<<
+    End With
+Case "16"
+        'Imposta il foglio da usare:
+    Set mySh = Workbooks("MAPPA.MAG.ESTERNI.xlsx").Sheets("STR.16")
+    'Rimuovi il textbox preesistente:
+    On Error Resume Next
+        mySh.Shapes("SHPPippa").Delete
+    On Error GoTo 0
+ '
+    With mySh
+        'Aggiungi textbox e imposta posizione, nome e orientation:
+        .Shapes.AddTextbox(msoTextOrientationHorizontal, 498, 406.5, 20.25, _
+        93.75).Select
+        .Shapes(mySh.Shapes.Count).Name = "SHPPippa"
+        
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Size = 14
+        .Shapes("SHPPippa").TextFrame2.Orientation = msoTextOrientationUpward
+        .Shapes("SHPPippa").TextFrame2.TextRange.ParagraphFormat.Alignment = _
+        msoAlignCenter
+        .Shapes("SHPPippa").TextFrame2.VerticalAnchor = msoAnchorMiddle
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Bold = msoTrue
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Fill.ForeColor.RGB = RGB(255, 0, 0)
+        'scrivici la targa:
+        .Shapes("SHPPippa").TextFrame.Characters.Text = Target.Offset(0, -14).Value
+        'manda in stampa:
+        .PrintOut    '<<<
+    End With
+Case "18"
+        'Imposta il foglio da usare:
+    Set mySh = Workbooks("MAPPA.MAG.ESTERNI.xlsx").Sheets("STR.18")
+    'Rimuovi il textbox preesistente:
+    On Error Resume Next
+        mySh.Shapes("SHPPippa").Delete
+    On Error GoTo 0
+ '
+    With mySh
+        'Aggiungi textbox e imposta posizione, nome e orientation:
+        .Shapes.AddTextbox(msoTextOrientationHorizontal, 498, 406.5, 20.25, _
+        93.75).Select
+        .Shapes(mySh.Shapes.Count).Name = "SHPPippa"
+        
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Size = 14
+        .Shapes("SHPPippa").TextFrame2.Orientation = msoTextOrientationUpward
+        .Shapes("SHPPippa").TextFrame2.TextRange.ParagraphFormat.Alignment = _
+        msoAlignCenter
+        .Shapes("SHPPippa").TextFrame2.VerticalAnchor = msoAnchorMiddle
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Bold = msoTrue
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Fill.ForeColor.RGB = RGB(255, 0, 0)
+        'scrivici la targa:
+        .Shapes("SHPPippa").TextFrame.Characters.Text = Target.Offset(0, -14).Value
+        'manda in stampa:
+        .PrintOut    '<<<
+    End With
+Case "EX.MERZ."
+        'Imposta il foglio da usare:
+    Set mySh = Workbooks("MAPPA.MAG.ESTERNI.xlsx").Sheets("EX.MERZ.")
+    'Rimuovi il textbox preesistente:
+    On Error Resume Next
+        mySh.Shapes("SHPPippa").Delete
+    On Error GoTo 0
+ '
+    With mySh
+        'Aggiungi textbox e imposta posizione, nome e orientation:
+        .Shapes.AddTextbox(msoTextOrientationHorizontal, 498, 406.5, 20.25, _
+        93.75).Select
+        .Shapes(mySh.Shapes.Count).Name = "SHPPippa"
+        
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Size = 14
+        .Shapes("SHPPippa").TextFrame2.Orientation = msoTextOrientationUpward
+        .Shapes("SHPPippa").TextFrame2.TextRange.ParagraphFormat.Alignment = _
+        msoAlignCenter
+        .Shapes("SHPPippa").TextFrame2.VerticalAnchor = msoAnchorMiddle
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Bold = msoTrue
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Fill.ForeColor.RGB = RGB(255, 0, 0)
+        'scrivici la targa:
+        .Shapes("SHPPippa").TextFrame.Characters.Text = Target.Offset(0, -14).Value
+        'manda in stampa:
+        .PrintOut    '<<<
+    End With
+        MsgBox ("MAGAZZINO ESTERNO AVVISA SPUNTATORE") '<<<
+Case "S.MARCO"
+        'Imposta il foglio da usare:
+    Set mySh = Workbooks("MAPPA.MAG.ESTERNI.xlsx").Sheets("S.MARCO")
+    'Rimuovi il textbox preesistente:
+    On Error Resume Next
+        mySh.Shapes("SHPPippa").Delete
+    On Error GoTo 0
+ '
+    With mySh
+        'Aggiungi textbox e imposta posizione, nome e orientation:
+        .Shapes.AddTextbox(msoTextOrientationHorizontal, 498, 406.5, 20.25, _
+        93.75).Select
+        .Shapes(mySh.Shapes.Count).Name = "SHPPippa"
+        
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Size = 14
+        .Shapes("SHPPippa").TextFrame2.Orientation = msoTextOrientationUpward
+        .Shapes("SHPPippa").TextFrame2.TextRange.ParagraphFormat.Alignment = _
+        msoAlignCenter
+        .Shapes("SHPPippa").TextFrame2.VerticalAnchor = msoAnchorMiddle
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Bold = msoTrue
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Fill.ForeColor.RGB = RGB(255, 0, 0)
+        'scrivici la targa:
+        .Shapes("SHPPippa").TextFrame.Characters.Text = Target.Offset(0, -14).Value
+        'manda in stampa:
+        .PrintOut    '<<<
+    End With
+        MsgBox ("MAGAZZINO ESTERNO AVVISA SPUNTATORE")        '<<<
+Case "3B"
+        'Imposta il foglio da usare:
+    Set mySh = Workbooks("MAPPA.MAG.ESTERNI.xlsx").Sheets("3B")
+    'Rimuovi il textbox preesistente:
+    On Error Resume Next
+        mySh.Shapes("SHPPippa").Delete
+    On Error GoTo 0
+ '
+    With mySh
+        'Aggiungi textbox e imposta posizione, nome e orientation:
+        .Shapes.AddTextbox(msoTextOrientationHorizontal, 498, 406.5, 20.25, _
+        93.75).Select
+        .Shapes(mySh.Shapes.Count).Name = "SHPPippa"
+        
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Size = 14
+        .Shapes("SHPPippa").TextFrame2.Orientation = msoTextOrientationUpward
+        .Shapes("SHPPippa").TextFrame2.TextRange.ParagraphFormat.Alignment = _
+        msoAlignCenter
+        .Shapes("SHPPippa").TextFrame2.VerticalAnchor = msoAnchorMiddle
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Bold = msoTrue
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Fill.ForeColor.RGB = RGB(255, 0, 0)
+        'scrivici la targa:
+        .Shapes("SHPPippa").TextFrame.Characters.Text = Target.Offset(0, -14).Value
+        'manda in stampa:
+        .PrintOut    '<<<
+    End With
+        MsgBox ("MAGAZZINO ESTERNO AVVISA SPUNTATORE") '<<<
+Case "RA MILL"
+        'Imposta il foglio da usare:
+    Set mySh = Workbooks("MAPPA.MAG.ESTERNI.xlsx").Sheets("RA MILL")
+    'Rimuovi il textbox preesistente:
+    On Error Resume Next
+        mySh.Shapes("SHPPippa").Delete
+    On Error GoTo 0
+ '
+    With mySh
+        'Aggiungi textbox e imposta posizione, nome e orientation:
+        .Shapes.AddTextbox(msoTextOrientationHorizontal, 498, 406.5, 20.25, _
+        93.75).Select
+        .Shapes(mySh.Shapes.Count).Name = "SHPPippa"
+        
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Size = 14
+        .Shapes("SHPPippa").TextFrame2.Orientation = msoTextOrientationUpward
+        .Shapes("SHPPippa").TextFrame2.TextRange.ParagraphFormat.Alignment = _
+        msoAlignCenter
+        .Shapes("SHPPippa").TextFrame2.VerticalAnchor = msoAnchorMiddle
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Bold = msoTrue
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Fill.ForeColor.RGB = RGB(255, 0, 0)
+        'scrivici la targa:
+        .Shapes("SHPPippa").TextFrame.Characters.Text = Target.Offset(0, -14).Value
+        'manda in stampa:
+        .PrintOut    '<<<
+    End With
+        MsgBox ("MAGAZZINO ESTERNO AVVISA SPUNTATORE") '<<<
+Case "MICRON MIN"
+        'Imposta il foglio da usare:
+    Set mySh = Workbooks("MAPPA.MAG.ESTERNI.xlsx").Sheets("MICRON MIN")
+    'Rimuovi il textbox preesistente:
+    On Error Resume Next
+        mySh.Shapes("SHPPippa").Delete
+    On Error GoTo 0
+ '
+    With mySh
+        'Aggiungi textbox e imposta posizione, nome e orientation:
+        .Shapes.AddTextbox(msoTextOrientationHorizontal, 498, 406.5, 20.25, _
+        93.75).Select
+        .Shapes(mySh.Shapes.Count).Name = "SHPPippa"
+        
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Size = 14
+        .Shapes("SHPPippa").TextFrame2.Orientation = msoTextOrientationUpward
+        .Shapes("SHPPippa").TextFrame2.TextRange.ParagraphFormat.Alignment = _
+        msoAlignCenter
+        .Shapes("SHPPippa").TextFrame2.VerticalAnchor = msoAnchorMiddle
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Bold = msoTrue
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Fill.ForeColor.RGB = RGB(255, 0, 0)
+        'scrivici la targa:
+        .Shapes("SHPPippa").TextFrame.Characters.Text = Target.Offset(0, -14).Value
+        'manda in stampa:
+        .PrintOut    '<<<
+    End With
+        MsgBox ("MAGAZZINO ESTERNO AVVISA SPUNTATORE") '<<<
+Case "COLACEM"
+        'Imposta il foglio da usare:
+    Set mySh = Workbooks("MAPPA.MAG.ESTERNI.xlsx").Sheets("COLACEM")
+    'Rimuovi il textbox preesistente:
+    On Error Resume Next
+        mySh.Shapes("SHPPippa").Delete
+    On Error GoTo 0
+ '
+    With mySh
+        'Aggiungi textbox e imposta posizione, nome e orientation:
+        .Shapes.AddTextbox(msoTextOrientationHorizontal, 498, 406.5, 20.25, _
+        93.75).Select
+        .Shapes(mySh.Shapes.Count).Name = "SHPPippa"
+        
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Size = 14
+        .Shapes("SHPPippa").TextFrame2.Orientation = msoTextOrientationUpward
+        .Shapes("SHPPippa").TextFrame2.TextRange.ParagraphFormat.Alignment = _
+        msoAlignCenter
+        .Shapes("SHPPippa").TextFrame2.VerticalAnchor = msoAnchorMiddle
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Bold = msoTrue
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Fill.ForeColor.RGB = RGB(255, 0, 0)
+        'scrivici la targa:
+        .Shapes("SHPPippa").TextFrame.Characters.Text = Target.Offset(0, -14).Value
+        'manda in stampa:
+        .PrintOut    '<<<
+    End With
+        MsgBox ("MAGAZZINO ESTERNO AVVISA SPUNTATORE") '<<<
+Case "SOCO VECCHIA"
+        'Imposta il foglio da usare:
+    Set mySh = Workbooks("MAPPA.MAG.ESTERNI.xlsx").Sheets("SOCO VECCHIA")
+    'Rimuovi il textbox preesistente:
+    On Error Resume Next
+        mySh.Shapes("SHPPippa").Delete
+    On Error GoTo 0
+ '
+    With mySh
+        'Aggiungi textbox e imposta posizione, nome e orientation:
+        .Shapes.AddTextbox(msoTextOrientationHorizontal, 498, 406.5, 20.25, _
+        93.75).Select
+        .Shapes(mySh.Shapes.Count).Name = "SHPPippa"
+        
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Size = 14
+        .Shapes("SHPPippa").TextFrame2.Orientation = msoTextOrientationUpward
+        .Shapes("SHPPippa").TextFrame2.TextRange.ParagraphFormat.Alignment = _
+        msoAlignCenter
+        .Shapes("SHPPippa").TextFrame2.VerticalAnchor = msoAnchorMiddle
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Bold = msoTrue
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Fill.ForeColor.RGB = RGB(255, 0, 0)
+        'scrivici la targa:
+        .Shapes("SHPPippa").TextFrame.Characters.Text = Target.Offset(0, -14).Value
+        'manda in stampa:
+        .PrintOut    '<<<
+    End With
+        MsgBox ("MAGAZZINO ESTERNO AVVISA SPUNTATORE") '<<<
+Case "CONSORZIO"
+        'Imposta il foglio da usare:
+    Set mySh = Workbooks("MAPPA.MAG.ESTERNI.xlsx").Sheets("CONSORZIO")
+    'Rimuovi il textbox preesistente:
+    On Error Resume Next
+        mySh.Shapes("SHPPippa").Delete
+    On Error GoTo 0
+ '
+    With mySh
+        'Aggiungi textbox e imposta posizione, nome e orientation:
+        .Shapes.AddTextbox(msoTextOrientationHorizontal, 498, 406.5, 20.25, _
+        93.75).Select
+        .Shapes(mySh.Shapes.Count).Name = "SHPPippa"
+        
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Size = 14
+        .Shapes("SHPPippa").TextFrame2.Orientation = msoTextOrientationUpward
+        .Shapes("SHPPippa").TextFrame2.TextRange.ParagraphFormat.Alignment = _
+        msoAlignCenter
+        .Shapes("SHPPippa").TextFrame2.VerticalAnchor = msoAnchorMiddle
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Bold = msoTrue
+        .Shapes("SHPPippa").TextFrame2.TextRange.Font.Fill.ForeColor.RGB = RGB(255, 0, 0)
+        'scrivici la targa:
+        .Shapes("SHPPippa").TextFrame.Characters.Text = Target.Offset(0, -14).Value
+        'manda in stampa:
+        .PrintOut    '<<<
+    End With
+        MsgBox ("MAGAZZINO ESTERNO AVVISA SPUNTATORE") '<<<
+    
+   
+End Select
+Xit:
+Cancel = True
+Entrata.Show
+End Sub
+'''
+
+Premesso questo vorrei che mi aiutassi a risolvere un problema:
+1- Allo stato attuale se in colonna "P" vi sono più di 15 celle compilate e in colonna "K" nelle rispettive righe non vi sono celle compilate (quindi risultano più di 15 camion all'interno della stessa area) compare un msgbox che avvisa "TROPPI CAMION", se si clicca ok però non permette di proseguire nell'inserimento del dato nella cella in colonna "P", mentre io vorrei che una volta che si clicca su ok, sia possibile proseguire l'inserimento dei dati. Non voglio aggiungere altre funzionalità, semplicemente quando si clicca su ok del msgbox che avvisa dei troppi camion il dato non deve scomparire, ma rimanere.
+
+### ASSISTANT
+Buongiorno!  
+Grazie per aver condiviso il codice completo: è molto utile per capire esattamente il comportamento attuale.
+
+### 📌 Problema riassunto:
+Nel tuo `Worksheet_Change`, quando si modifica una cella in colonna **P** (zona di carico), viene eseguito un controllo con `VLOOKUP` sul foglio **"Zona di Carico"** per verificare se il numero di camion attualmente presenti in quella zona supera un certo limite.  
+Se il limite è superato, appare un avviso **"TROPPI CAMION"**, e **la cella viene svuotata** (`Target.Value = ""`).
+
+Tu invece **vuoi che il valore resti nella cella** anche dopo aver chiuso il messaggio, **senza cancellarlo**.
+
+---
+
+### 🔍 Analisi del codice incriminato:
+Questo è il blocco che gestisce il controllo:
+
+```vba
+If Not Intersect(Target, Range("P2:P201")) Is Nothing Then
+    If Application.WorksheetFunction.VLookup(Target.Offset(0, 0), Sheets("Zona di Carico").Range("D4:H24"), 4, False) _
+    > WorksheetFunction.VLookup(Target.Offset(0, 0), Sheets("Zona di Carico").Range("D4:H24"), 5, False) Then
+        MsgBox ("TROPPI CAMION")
+        Application.EnableEvents = True
+        Target.Offset(0, 0) = ""
+        Application.EnableEvents = True
+    End If
+End If
+```
+
+> ❗ Nota: c'è un piccolo errore qui: `Application.EnableEvents = True` viene impostato **due volte**, ma non viene mai disattivato prima. In realtà, **non serve** in questo contesto, perché non stai modificando altre celle in modo ricorsivo. Ma soprattutto: **stai cancellando il valore con `Target = ""`**, ed è questo che devi evitare.
+
+---
+
+### ✅ Soluzione richiesta:
+**Rimuovi semplicemente la riga che cancella il valore**, e mantieni solo il messaggio.
+
+#### ✨ Codice corretto:
+Sostituisci il blocco sopra con questo:
+
+```vba
+If Not Intersect(Target, Range("P2:P201")) Is Nothing Then
+    On Error Resume Next ' Per evitare errori se la zona non è trovata
+    Dim limiteAttuale As Variant, limiteMassimo As Variant
+    limiteAttuale = Application.VLookup(Target.Value, Sheets("Zona di Carico").Range("D4:H24"), 4, False)
+    limiteMassimo = Application.VLookup(Target.Value, Sheets("Zona di Carico").Range("D4:H24"), 5, False)
+    On Error GoTo 0
+    
+    ' Verifica solo se entrambi i valori sono validi
+    If Not IsError(limiteAttuale) And Not IsError(limiteMassimo) Then
+        If limiteAttuale > limiteMassimo Then
+            MsgBox "TROPPI CAMION", vbExclamation
+            ' NOTA: non cancelliamo il valore → il dato resta!
+        End If
+    End If
+End If
+```
+
+> ✅ **Risultato**: il messaggio appare, ma il valore inserito in colonna **P rimane**.
+
+---
+
+### 💡 Extra (opzionale ma consigliato):
+Il tuo codice originale usa `Application.WorksheetFunction.VLookup`, che **lancia un errore VBA se non trova il valore** (bloccando l'esecuzione). Usare `Application.VLookup` (senza `WorksheetFunction`) restituisce un valore di errore (`CVErr`) che puoi gestire con `IsError()`, evitando crash imprevisti.
+
+Il codice corretto sopra include questa protezione.
+
+---
+
+### 🛠️ Cosa devi fare:
+1. Apri l’editor VBA (`Alt + F11`)
+2. Vai nel modulo del **Foglio1** (dove c’è il tuo `Worksheet_Change`)
+3. **Sostituisci** il blocco relativo al controllo su colonna P con la versione corretta qui sopra.
+4. Salva e prova.
+
+---
+
+Se hai bisogno di mantenere il conteggio dinamico (es. il valore nella colonna 4 del foglio “Zona di Carico” si aggiorna in base ai camion presenti), assicurati che quella logica sia gestita altrove (es. con formule o altre macro), ma **questo controllo non deve cancellare l’input** — e ora non lo farà più.
+
+Fammi sapere se vuoi anche che il messaggio mostri **quanti camion ci sono vs il limite**, o se desideri altri piccoli miglioramenti!

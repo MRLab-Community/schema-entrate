@@ -1,0 +1,65 @@
+### USER
+Buongiorno Qwen, oggi vorrei aggiungere una macro che quando chiudo il file schema entrate, chiude anche il file MAPPA.MAG.ESTERNI.xlsx sito nel percorso Q:\SCANNERTRASPORTI\DOC UFF TRASPORTI\[[[ [[[ SHEMA ENTRATE ]]] ]]]\MAPPA.MAG.ESTERNI.xlsx che si apre all'apertura del file schema entrate e che permette la stampa automatica della piantina di carico e della safetycard.
+
+### ASSISTANT
+Buongiorno! Ecco una macro VBA da inserire nel modulo `ThisWorkbook` del file **schema entrate** per chiudere automaticamente anche **MAPPA.MAG.ESTERNI.xlsx** all’uscita:
+
+```vba
+Private Sub Workbook_BeforeClose(Cancel As Boolean)
+    Dim wbTarget As Workbook
+    On Error Resume Next
+    Set wbTarget = Workbooks("MAPPA.MAG.ESTERNI.xlsx")
+    On Error GoTo 0
+    
+    If Not wbTarget Is Nothing Then
+        wbTarget.Close SaveChanges:=False ' o True se vuoi salvare eventuali modifiche
+    End If
+End Sub
+```
+
+### Istruzioni:
+1. Apri il file **schema entrate**.
+2. Premi `ALT + F11` per aprire l’editor VBA.
+3. Nella finestra *Project Explorer*, fai doppio clic su **ThisWorkbook** (sotto il tuo file).
+4. Incolla il codice sopra.
+5. Chiudi l’editor VBA e salva il file come **cartella di lavoro con macro abilitate (.xlsm)**.
+
+> ✅ La macro funziona solo se **MAPPA.MAG.ESTERNI.xlsx** è aperto nello stesso istanza di Excel.  
+> 🔒 Se il file è in sola lettura o bloccato da un altro processo, potrebbe non chiudersi correttamente.
+
+Fammi sapere se desideri anche che la chiusura sia silenziosa (senza avvisi) o se vuoi gestire casi particolari (es. salvataggio condizionato).
+
+### USER
+In ThisWorkbook \ BeforClose ho già:
+'''
+Private Sub Workbook_BeforeClose(Cancel As Boolean)
+
+Call Macro2
+FermaControllo
+
+End Sub
+'''
+
+### ASSISTANT
+Perfetto. Basta integrare la chiusura del file **MAPPA.MAG.ESTERNI.xlsx** all’interno della tua routine esistente. Ecco il codice aggiornato per `ThisWorkbook`:
+
+```vba
+Private Sub Workbook_BeforeClose(Cancel As Boolean)
+    Call Macro2
+    FermaControllo
+    
+    ' Chiude MAPPA.MAG.ESTERNI.xlsx senza salvare
+    Dim wbMappa As Workbook
+    On Error Resume Next
+    Set wbMappa = Workbooks("MAPPA.MAG.ESTERNI.xlsx")
+    On Error GoTo 0
+    If Not wbMappa Is Nothing Then wbMappa.Close SaveChanges:=False
+End Sub
+```
+
+### Note:
+- Il file **MAPPA.MAG.ESTERNI.xlsx** deve essere aperto nella stessa istanza di Excel.
+- `SaveChanges:=False` evita richieste di salvataggio; modifica in `True` solo se necessario.
+- Non interferisce con le tue macro esistenti (`Macro2`, `FermaControllo`).
+
+Salva il file come `.xlsm` dopo l’aggiornamento.
